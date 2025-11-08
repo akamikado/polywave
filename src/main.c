@@ -4,10 +4,10 @@
 #include <stdio.h>
 
 void *game = NULL;
-game_init_t *game_init = NULL;
-game_update_t *game_update = NULL;
-game_pre_reload_t *game_pre_reload = NULL;
-game_post_reload_t *game_post_reload = NULL;
+
+#define X(name, ...) name##_t *name = NULL;
+GAME_VARS
+#undef X
 
 void reload() {
   void *state = NULL;
@@ -21,6 +21,7 @@ void reload() {
   game_update = (game_update_t *)dlsym(game, "game_update");
   game_pre_reload = (game_pre_reload_t *)dlsym(game, "game_pre_reload");
   game_post_reload = (game_post_reload_t *)dlsym(game, "game_post_reload");
+  game_close = (game_close_t *)dlsym(game, "game_close");
 
   if (state != NULL) {
     game_post_reload(state);
@@ -40,4 +41,5 @@ int main(int argc, char **argv) {
     game_update();
     EndDrawing();
   }
+  game_close();
 }
