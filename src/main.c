@@ -41,5 +41,6 @@ int main(int argc, char **argv) {
     game_update();
     EndDrawing();
   }
+  CloseWindow();
   game_close();
 }
