@@ -1,7 +1,7 @@
 #include "game.h"
 #include <complex.h>
-#include <math.h>
 #include <raylib.h>
+#include <raymath.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -16,6 +16,7 @@ typedef struct {
   float in_smooth[FFT_SIZE];
   float complex out_raw[FFT_SIZE];
   float out[FFT_SIZE];
+  float out_smooth[FFT_SIZE];
 } State;
 
 static State *s = NULL;
@@ -29,9 +30,17 @@ static void audio_callback(void *bufferData, unsigned int frames) {
   }
 }
 
-static inline float amp(float complex n) {
-  float n_ = cabs(n);
-  return logf(n_ * n_);
+static inline float amp(float complex z) {
+  float zabs = cabs(z);
+  return logf(zabs * zabs);
+}
+
+static void fft_clean() {
+  memset(s->in_raw, 0, sizeof(s->in_raw));
+  memset(s->in_smooth, 0, sizeof(s->in_smooth));
+  memset(s->out_raw, 0, sizeof(s->out_raw));
+  memset(s->out, 0, sizeof(s->out));
+  memset(s->out_smooth, 0, sizeof(s->out_smooth));
 }
 
 // https://en.wikipedia.org/wiki/Cooley%E2%80%93Tukey_FFT_algorithm#Data_reordering,_bit_reversal,_and_in-place_algorithms
@@ -68,10 +77,61 @@ static void fft(float *a, float complex *A) {
   }
 }
 
+void fft_render(Rectangle bbox) {
+  // https://en.wikipedia.org/wiki/Hann_function
+  for (size_t i = 0; i < FFT_SIZE; ++i) {
+    float t = (float)i / FFT_SIZE;
+    float hann = 0.5 - 0.5 * cosf(2 * M_PI * t);
+    s->in_smooth[i] = s->in_raw[i] * hann;
+  }
+
+  fft(s->in_smooth, s->out_raw);
+
+  float step = 1.059463094359;
+  float lowf = 1.0f;
+  size_t out_cnt = 0;
+  float max_amp = 1.0f;
+  for (float f = lowf; (size_t)f < FFT_SIZE / 2; f = ceilf(f * step)) {
+    float f1 = ceilf(f * step);
+    float a = 0.0f;
+    for (size_t q = (size_t)f; q < FFT_SIZE / 2 && q < (size_t)f1; ++q) {
+      float b = amp(s->out_raw[q]);
+      if (b > a)
+        a = b;
+    }
+    if (max_amp < a)
+      max_amp = a;
+    s->out[out_cnt++] = a;
+  }
+
+  // Normalize
+  for (size_t i = 0; i < out_cnt; ++i) {
+    s->out[i] /= max_amp;
+  }
+
+  int smoothness = 15;
+  float dt = GetFrameTime();
+  for (size_t i = 0; i < out_cnt; ++i) {
+    s->out_smooth[i] += (s->out[i] - s->out_smooth[i]) * smoothness * dt;
+  }
+
+  float rec_width = bbox.width / out_cnt;
+
+  for (int i = 0; i < out_cnt; i++) {
+    Vector2 start_pos = {.x = bbox.x + rec_width * i,
+                         .y = bbox.y + bbox.height -
+                              bbox.height * s->out_smooth[i]};
+    Vector2 size = {.x = rec_width, .y = bbox.height * s->out_smooth[i]};
+    DrawRectangleV(start_pos, size, RED);
+  }
+}
+
 void game_init() {
+  SetTargetFPS(60);
   s = malloc(sizeof(State));
   InitAudioDevice();
-  s->song = strdup("build/Insane-Gameplay.mp3");
+  s->song = strdup("build/In-the-Dead-of-Night.ogg");
+  /* s->song = strdup("build/Insane-Gameplay.mp3"); */
   s->wave = LoadWave(s->song);
   s->music = LoadMusicStream(s->song);
   PlayMusicStream(s->music);
@@ -83,40 +143,17 @@ void game_update() {
   if (IsMusicStreamPlaying(s->music)) {
     UpdateMusicStream(s->music);
 
-    // https://en.wikipedia.org/wiki/Hann_function
-    for (size_t i = 0; i < FFT_SIZE; ++i) {
-      float t = (float)i / FFT_SIZE;
-      float hann = 0.5 - 0.5 * cosf(2 * M_PI * t);
-      s->in_smooth[i] = s->in_raw[i] * hann;
-    }
-
-    fft(s->in_smooth, s->out_raw);
-
-    float step = 1.06;
-    float lowf = 1.0f;
-    size_t out_cnt = 0;
-    float max_amp = 1.0f;
-    for (float f = lowf; (size_t)f < FFT_SIZE / 2; f = ceilf(f * step)) {
-      float f1 = ceilf(f * step);
-      float a = 0.0f;
-      for (size_t q = (size_t)f; q < FFT_SIZE / 2 && q < (size_t)f1; ++q) {
-        float b = amp(s->out_raw[q]);
-        if (b > a)
-          a = b;
-      }
-      if (max_amp < a)
-        max_amp = a;
-      s->out[out_cnt++] = a;
-    }
-
-    // Normalize
-    for (size_t i = 0; i < out_cnt; ++i) {
-      s->out[i] /= max_amp;
-    }
+    float w = GetScreenWidth();
+    float h = GetScreenHeight();
+    Rectangle bbox = {.x = 0, .y = 100, .width = w, .height = h - 200};
+    fft_render(bbox);
   }
 }
 
-void *game_pre_reload() { return s; }
+void *game_pre_reload() {
+  fft_clean();
+  return s;
+}
 
 void game_post_reload(void *prevState) { s = prevState; }
 
