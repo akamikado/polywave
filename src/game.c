@@ -1,5 +1,6 @@
 #include "game.h"
 #include <complex.h>
+#include <math.h>
 #include <raylib.h>
 #include <raymath.h>
 #include <stdlib.h>
@@ -16,7 +17,6 @@ typedef struct {
   float in_smooth[FFT_SIZE];
   float complex out_raw[FFT_SIZE];
   float out[FFT_SIZE];
-  float out_smooth[FFT_SIZE];
 } State;
 
 static State *s = NULL;
@@ -30,17 +30,11 @@ static void audio_callback(void *bufferData, unsigned int frames) {
   }
 }
 
-static inline float amp(float complex z) {
-  float zabs = cabs(z);
-  return logf(zabs * zabs);
-}
-
 static void fft_clean() {
   memset(s->in_raw, 0, sizeof(s->in_raw));
   memset(s->in_smooth, 0, sizeof(s->in_smooth));
   memset(s->out_raw, 0, sizeof(s->out_raw));
   memset(s->out, 0, sizeof(s->out));
-  memset(s->out_smooth, 0, sizeof(s->out_smooth));
 }
 
 // https://en.wikipedia.org/wiki/Cooley%E2%80%93Tukey_FFT_algorithm#Data_reordering,_bit_reversal,_and_in-place_algorithms
@@ -90,18 +84,32 @@ void fft_render(Rectangle bbox) {
   float step = 1.059463094359;
   float lowf = 1.0f;
   size_t out_cnt = 0;
-  float max_amp = 1.0f;
+  float max_amp = 1e-6f;
+  float smoothness = 8 * GetFrameTime();
+
   for (float f = lowf; (size_t)f < FFT_SIZE / 2; f = ceilf(f * step)) {
     float f1 = ceilf(f * step);
     float a = 0.0f;
+    float sum = 0.0f;
+    size_t cnt = 0;
     for (size_t q = (size_t)f; q < FFT_SIZE / 2 && q < (size_t)f1; ++q) {
-      float b = amp(s->out_raw[q]);
-      if (b > a)
-        a = b;
+      // Amplitude
+      float b = cabsf(s->out_raw[q]);
+      /* if (b > a) { */
+      /*   a = b; */
+      /* } */
+      sum += b * b;
+      /* sum += b; */
+      cnt++;
     }
-    if (max_amp < a)
-      max_amp = a;
-    s->out[out_cnt++] = a;
+    /* a = cnt > 0 ? sum / cnt : 0; */
+    a = cnt > 0 ? sqrtf(sum / cnt) : 0;
+    a = log1pf(a * 1.0f);
+
+    s->out[out_cnt] = s->out[out_cnt] * (1.0f - smoothness) + a * smoothness;
+    if (max_amp < s->out[out_cnt])
+      max_amp = s->out[out_cnt];
+    out_cnt++;
   }
 
   // Normalize
@@ -109,19 +117,12 @@ void fft_render(Rectangle bbox) {
     s->out[i] /= max_amp;
   }
 
-  int smoothness = 15;
-  float dt = GetFrameTime();
-  for (size_t i = 0; i < out_cnt; ++i) {
-    s->out_smooth[i] += (s->out[i] - s->out_smooth[i]) * smoothness * dt;
-  }
-
   float rec_width = bbox.width / out_cnt;
 
   for (int i = 0; i < out_cnt; i++) {
     Vector2 start_pos = {.x = bbox.x + rec_width * i,
-                         .y = bbox.y + bbox.height -
-                              bbox.height * s->out_smooth[i]};
-    Vector2 size = {.x = rec_width, .y = bbox.height * s->out_smooth[i]};
+                         .y = bbox.y + bbox.height - bbox.height * s->out[i]};
+    Vector2 size = {.x = rec_width, .y = bbox.height * s->out[i]};
     DrawRectangleV(start_pos, size, RED);
   }
 }
@@ -134,6 +135,7 @@ void game_init() {
   /* s->song = strdup("build/Insane-Gameplay.mp3"); */
   s->wave = LoadWave(s->song);
   s->music = LoadMusicStream(s->song);
+  fft_clean();
   PlayMusicStream(s->music);
   AttachAudioStreamProcessor(s->music.stream, audio_callback);
 }
