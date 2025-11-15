@@ -17,9 +17,15 @@ typedef struct {
   float in_smooth[FFT_SIZE];
   float complex out_raw[FFT_SIZE];
   float out[FFT_SIZE];
-} State;
 
-static State *s = NULL;
+  float gravity_acceleration;
+
+  Vector2 character_pos;
+  Vector2 character_size;
+  Vector2 character_speed;
+} ReloadableState;
+
+static ReloadableState *s = NULL;
 
 static void audio_callback(void *bufferData, unsigned int frames) {
   float (*fs)[2] = bufferData;
@@ -137,9 +143,12 @@ void fft_render(Rectangle bbox) {
   }
 }
 
+#define PLAYER_HORIZONTAL_SPD 350
+#define PLAYER_VERTICAL_SPD 500
+
 void game_init() {
   SetTargetFPS(60);
-  s = malloc(sizeof(State));
+  s = malloc(sizeof(ReloadableState));
   InitAudioDevice();
   s->song = strdup("build/bfg_division.mp3");
   /* s->song = strdup("build/In-the-Dead-of-Night.ogg"); */
@@ -148,8 +157,14 @@ void game_init() {
   s->wave = LoadWave(s->song);
   s->music = LoadMusicStream(s->song);
   fft_clean();
-  PlayMusicStream(s->music);
+  /* PlayMusicStream(s->music); */
   AttachAudioStreamProcessor(s->music.stream, audio_callback);
+
+  s->gravity_acceleration = -1000;
+
+  s->character_pos = (Vector2){.x = 100, .y = 100};
+  s->character_size = (Vector2){.x = 50, .y = 50};
+  s->character_speed = (Vector2){.x = 0, .y = 0};
 }
 
 void game_update() {
@@ -162,6 +177,30 @@ void game_update() {
     Rectangle bbox = {.x = 0, .y = 100, .width = w, .height = h - 200};
     fft_render(bbox);
   }
+
+  float dt = GetFrameTime();
+
+  if (IsKeyPressed(KEY_SPACE)) {
+    s->character_speed.y = -PLAYER_VERTICAL_SPD;
+  }
+
+  if (IsKeyDown(KEY_D) || IsKeyPressed(KEY_D)) {
+    s->character_speed.x = PLAYER_HORIZONTAL_SPD;
+  } else if (IsKeyPressed(KEY_A) || IsKeyDown(KEY_A)) {
+    s->character_speed.x = -PLAYER_HORIZONTAL_SPD;
+  } else {
+    s->character_speed.x = 0;
+  }
+
+  s->character_speed.y -= s->gravity_acceleration * dt;
+
+  s->character_pos.x += s->character_speed.x * dt;
+  s->character_pos.y += s->character_speed.y * dt;
+
+  DrawRectangleV(Vector2Subtract(s->character_pos,
+                                 Vector2Divide(s->character_size,
+                                               (Vector2){.x = 2, .y = 2})),
+                 s->character_size, RED);
 }
 
 void *game_pre_reload() {
