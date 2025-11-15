@@ -85,7 +85,8 @@ void fft_render(Rectangle bbox) {
   float lowf = 1.0f;
   size_t out_cnt = 0;
   float max_amp = 1e-6f;
-  float smoothness = 8 * GetFrameTime();
+  float smoothness = 0.85f;
+  float amplify = 1.0f;
 
   for (float f = lowf; (size_t)f < FFT_SIZE / 2; f = ceilf(f * step)) {
     float f1 = ceilf(f * step);
@@ -104,9 +105,9 @@ void fft_render(Rectangle bbox) {
     }
     /* a = cnt > 0 ? sum / cnt : 0; */
     a = cnt > 0 ? sqrtf(sum / cnt) : 0;
-    a = log1pf(a * 1.0f);
+    a = log1pf(a * amplify);
 
-    s->out[out_cnt] = s->out[out_cnt] * (1.0f - smoothness) + a * smoothness;
+    s->out[out_cnt] = s->out[out_cnt] * smoothness + a * (1.0f - smoothness);
     if (max_amp < s->out[out_cnt])
       max_amp = s->out[out_cnt];
     out_cnt++;
@@ -117,12 +118,21 @@ void fft_render(Rectangle bbox) {
     s->out[i] /= max_amp;
   }
 
-  float rec_width = bbox.width / out_cnt;
+  int num_bars = 30;
+  int amp_per_bar = floor(out_cnt / num_bars);
+  float rec_width = bbox.width / (num_bars * 2);
+  float gap_between_bars = bbox.width / (num_bars * 2);
 
-  for (int i = 0; i < out_cnt; i++) {
-    Vector2 start_pos = {.x = bbox.x + rec_width * i,
-                         .y = bbox.y + bbox.height - bbox.height * s->out[i]};
-    Vector2 size = {.x = rec_width, .y = bbox.height * s->out[i]};
+  for (int i = 0; i < num_bars; i++) {
+    float avg_amp = 0.0f;
+    for (int j = 0; i * amp_per_bar + j < out_cnt && j < amp_per_bar; j++) {
+      avg_amp += s->out[i * amp_per_bar + j];
+    }
+    avg_amp /= amp_per_bar;
+
+    Vector2 start_pos = {.x = bbox.x + (gap_between_bars + rec_width) * i,
+                         .y = bbox.y + bbox.height - bbox.height * avg_amp};
+    Vector2 size = {.x = rec_width, .y = bbox.height * avg_amp};
     DrawRectangleV(start_pos, size, RED);
   }
 }
@@ -131,7 +141,9 @@ void game_init() {
   SetTargetFPS(60);
   s = malloc(sizeof(State));
   InitAudioDevice();
-  s->song = strdup("build/In-the-Dead-of-Night.ogg");
+  s->song = strdup("build/bfg_division.mp3");
+  /* s->song = strdup("build/In-the-Dead-of-Night.ogg"); */
+  /* s->song = strdup("build/Dark-Lands.mp3"); */
   /* s->song = strdup("build/Insane-Gameplay.mp3"); */
   s->wave = LoadWave(s->song);
   s->music = LoadMusicStream(s->song);
