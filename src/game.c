@@ -18,11 +18,12 @@ typedef struct {
   float complex out_raw[FFT_SIZE];
   float out[FFT_SIZE];
 
-  float gravity_acceleration;
+  Camera2D camera;
 
   Vector2 character_pos;
-  Vector2 character_size;
-  Vector2 character_speed;
+  float character_size;
+  float character_speed;
+  float cursor_size;
 } ReloadableState;
 
 static ReloadableState *s = NULL;
@@ -143,64 +144,67 @@ void fft_render(Rectangle bbox) {
   }
 }
 
-#define PLAYER_HORIZONTAL_SPD 350
-#define PLAYER_VERTICAL_SPD 500
+#define PLAYER_SPD 500
 
 void game_init() {
   SetTargetFPS(60);
+
   s = malloc(sizeof(ReloadableState));
+  memset(s, 0, sizeof(s)); 
+
   InitAudioDevice();
   s->song = strdup("build/bfg_division.mp3");
   /* s->song = strdup("build/In-the-Dead-of-Night.ogg"); */
   /* s->song = strdup("build/Dark-Lands.mp3"); */
   /* s->song = strdup("build/Insane-Gameplay.mp3"); */
+
   s->wave = LoadWave(s->song);
   s->music = LoadMusicStream(s->song);
   fft_clean();
   /* PlayMusicStream(s->music); */
   AttachAudioStreamProcessor(s->music.stream, audio_callback);
 
-  s->gravity_acceleration = -1000;
+  s->camera.offset = (Vector2){.x = WNDW_WIDTH / 2, .y = WNDW_HEIGHT / 2};
+  s->camera.target = s->character_pos;
+  s->camera.rotation = 0.0f;
+  s->camera.zoom = 1.0f;
 
-  s->character_pos = (Vector2){.x = 100, .y = 100};
-  s->character_size = (Vector2){.x = 50, .y = 50};
-  s->character_speed = (Vector2){.x = 0, .y = 0};
+  s->character_size = 50.0f;
+  s->cursor_size = 10.0f;
 }
 
 void game_update() {
+  float w = GetScreenWidth();
+  float h = GetScreenHeight();
+  float dt = GetFrameTime();
+
+  HideCursor();
+
+  s->camera.offset = (Vector2){.x = WNDW_WIDTH / 2, .y = WNDW_HEIGHT / 2};
+  s->camera.target = s->character_pos;
+
   ClearBackground(BLACK);
+
   if (IsMusicStreamPlaying(s->music)) {
     UpdateMusicStream(s->music);
 
-    float w = GetScreenWidth();
-    float h = GetScreenHeight();
     Rectangle bbox = {.x = 0, .y = 100, .width = w, .height = h - 200};
     fft_render(bbox);
   }
 
-  float dt = GetFrameTime();
+  Vector2 mouse = GetMousePosition();
+  Vector2 mouse_center_relative = Vector2Subtract(mouse, (Vector2){.x = WNDW_WIDTH / 2, .y = WNDW_HEIGHT / 2});
+  float mouse_center_distance = Vector2Length(mouse_center_relative);
 
-  if (IsKeyPressed(KEY_SPACE)) {
-    s->character_speed.y = -PLAYER_VERTICAL_SPD;
-  }
+  s->character_speed = PLAYER_SPD * ((mouse_center_distance - s->character_size) / Vector2Length((Vector2){.x = WNDW_WIDTH / 2, .y = WNDW_HEIGHT / 2}));
+  s->character_speed = s->character_speed < 0 ? 0 : s->character_speed;
 
-  if (IsKeyDown(KEY_D) || IsKeyPressed(KEY_D)) {
-    s->character_speed.x = PLAYER_HORIZONTAL_SPD;
-  } else if (IsKeyPressed(KEY_A) || IsKeyDown(KEY_A)) {
-    s->character_speed.x = -PLAYER_HORIZONTAL_SPD;
-  } else {
-    s->character_speed.x = 0;
-  }
+  BeginMode2D(s->camera);
 
-  s->character_speed.y -= s->gravity_acceleration * dt;
+  DrawCircleV(s->character_pos, s->character_size, RED);
+  DrawCircleV(mouse_center_relative, s->cursor_size, RED);
 
-  s->character_pos.x += s->character_speed.x * dt;
-  s->character_pos.y += s->character_speed.y * dt;
-
-  DrawRectangleV(Vector2Subtract(s->character_pos,
-                                 Vector2Divide(s->character_size,
-                                               (Vector2){.x = 2, .y = 2})),
-                 s->character_size, RED);
+  EndMode2D();
 }
 
 void *game_pre_reload() {

@@ -1,6 +1,9 @@
 #ifndef GAME_H_
 #define GAME_H_
 
+#define WNDW_WIDTH  800
+#define WNDW_HEIGHT 600
+
 #define GAME_VARS                                                              \
   X(game_init, void, void)                                                     \
   X(game_update, void, void)                                                   \

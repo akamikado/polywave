@@ -32,7 +32,7 @@ int main(int argc, char **argv) {
   reload();
 
   game_init();
-  InitWindow(800, 600, "New Game");
+  InitWindow(WNDW_WIDTH, WNDW_HEIGHT, "New Game");
   while (!WindowShouldClose()) {
     if (IsKeyPressed(KEY_R)) {
       reload();
