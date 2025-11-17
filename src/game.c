@@ -22,7 +22,7 @@ typedef struct {
 
   Vector2 character_pos;
   float character_size;
-  float character_speed;
+  Vector2 character_speed;
   float cursor_size;
 } ReloadableState;
 
@@ -144,7 +144,7 @@ void fft_render(Rectangle bbox) {
   }
 }
 
-#define PLAYER_SPD 500
+#define PLAYER_SPD 75
 
 void game_init() {
   SetTargetFPS(60);
@@ -194,15 +194,21 @@ void game_update() {
 
   Vector2 mouse = GetMousePosition();
   Vector2 mouse_center_relative = Vector2Subtract(mouse, (Vector2){.x = WNDW_WIDTH / 2, .y = WNDW_HEIGHT / 2});
-  float mouse_center_distance = Vector2Length(mouse_center_relative);
+  Vector2 mouse_character_relative = Vector2Add(mouse_center_relative, s->character_pos);
 
-  s->character_speed = PLAYER_SPD * ((mouse_center_distance - s->character_size) / Vector2Length((Vector2){.x = WNDW_WIDTH / 2, .y = WNDW_HEIGHT / 2}));
-  s->character_speed = s->character_speed < 0 ? 0 : s->character_speed;
+  if (Vector2Length(mouse_center_relative) > s->character_size) {
+    s->character_speed.x = PLAYER_SPD * (mouse_center_relative.x / (WNDW_WIDTH / 2));
+    s->character_speed.y = PLAYER_SPD * (mouse_center_relative.y / (WNDW_WIDTH / 2));
+  } else {
+    s->character_speed.x = 0;
+    s->character_speed.y = 0;
+  }
+  s->character_pos = Vector2Add(s->character_pos, Vector2Scale(s->character_speed, dt));
 
   BeginMode2D(s->camera);
 
   DrawCircleV(s->character_pos, s->character_size, RED);
-  DrawCircleV(mouse_center_relative, s->cursor_size, RED);
+  DrawCircleV(mouse_character_relative, s->cursor_size, RED);
 
   EndMode2D();
 }
