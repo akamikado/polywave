@@ -24,6 +24,8 @@ typedef struct {
   float character_size;
   Vector2 character_speed;
   float cursor_size;
+
+  float load_radius;
 } ReloadableState;
 
 static ReloadableState *s = NULL;
@@ -146,6 +148,11 @@ void fft_render(Rectangle bbox) {
 
 #define PLAYER_SPD 75
 
+#define CHUNK_SIZE 100
+typedef struct {
+
+} Map_Chunk;
+
 void game_init() {
   SetTargetFPS(60);
 
@@ -169,8 +176,9 @@ void game_init() {
   s->camera.rotation = 0.0f;
   s->camera.zoom = 1.0f;
 
-  s->character_size = 50.0f;
+  s->character_size = 40.0f;
   s->cursor_size = 10.0f;
+  s->load_radius = 90.0f;
 }
 
 void game_update() {
@@ -207,6 +215,7 @@ void game_update() {
 
   BeginMode2D(s->camera);
 
+  DrawCircleLinesV(s->character_pos, s->load_radius, WHITE);
   DrawCircleV(s->character_pos, s->character_size, RED);
   DrawCircleV(mouse_character_relative, s->cursor_size, RED);
 
