@@ -128,13 +128,13 @@ void fft_render(Rectangle bbox) {
   }
 
   int num_bars = 30;
-  int amp_per_bar = floor(out_cnt / num_bars);
+  size_t amp_per_bar = floor(out_cnt / num_bars);
   float rec_width = bbox.width / (num_bars * 2);
   float gap_between_bars = bbox.width / (num_bars * 2);
 
   for (int i = 0; i < num_bars; i++) {
     float avg_amp = 0.0f;
-    for (int j = 0; i * amp_per_bar + j < out_cnt && j < amp_per_bar; j++) {
+    for (size_t j = 0; i * amp_per_bar + j < out_cnt && j < amp_per_bar; j++) {
       avg_amp += s->out[i * amp_per_bar + j];
     }
     avg_amp /= amp_per_bar;
