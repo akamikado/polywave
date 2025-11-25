@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include "game.h"
 #include <dlfcn.h>
 #include <raylib.h>
@@ -17,6 +18,11 @@ void reload() {
   }
 
   game = dlopen("build/game.so", RTLD_NOW);
+  char* e = dlerror();
+  if (e != NULL) {
+    fprintf(stderr, "%s\n", e);
+    exit(1);
+  }
   game_init = (game_init_t *)dlsym(game, "game_init");
   game_update = (game_update_t *)dlsym(game, "game_update");
   game_pre_reload = (game_pre_reload_t *)dlsym(game, "game_pre_reload");

@@ -5,8 +5,17 @@
 #include <raymath.h>
 #include <stdlib.h>
 #include <string.h>
+#define STB_DS_IMPLEMENTATION
+#include "stb_ds.h"
 
 #define FFT_SIZE (1 << 13)
+
+typedef struct {
+} Map_Chunk;
+
+#define LOAD_RADIUS 750.0f
+#define CHUNK_SIZE 400.0f
+#define MAX_CHUNKS (size_t)(1024*1024 / sizeof(Map_Chunk))
 
 typedef struct {
   char *song;
@@ -25,10 +34,23 @@ typedef struct {
   Vector2 character_speed;
   float cursor_size;
 
-  float load_radius;
+  struct {
+    Vector2 key;
+    Map_Chunk* value;
+  }* chunk_loaded; 
 } ReloadableState;
 
 static ReloadableState *s = NULL;
+
+static Map_Chunk* generate_chunk() {
+  Map_Chunk* c = malloc(sizeof(*c));
+  // Generate chunk objects
+  return c;
+}
+
+static void unload_chunk() {
+  // Unload chunk in LRU fashion
+}
 
 static void audio_callback(void *bufferData, unsigned int frames) {
   float (*fs)[2] = bufferData;
@@ -146,18 +168,14 @@ void fft_render(Rectangle bbox) {
   }
 }
 
-#define PLAYER_SPD 75
+#define PLAYER_SPD 100
 
-#define CHUNK_SIZE 100
-typedef struct {
-
-} Map_Chunk;
 
 void game_init() {
   SetTargetFPS(60);
 
   s = malloc(sizeof(ReloadableState));
-  memset(s, 0, sizeof(s)); 
+  memset(s, 0, sizeof(*s)); 
 
   InitAudioDevice();
   s->song = strdup("build/bfg_division.mp3");
@@ -178,7 +196,8 @@ void game_init() {
 
   s->character_size = 40.0f;
   s->cursor_size = 10.0f;
-  s->load_radius = 90.0f;
+
+  s->chunk_loaded = NULL;
 }
 
 void game_update() {
@@ -213,9 +232,35 @@ void game_update() {
   }
   s->character_pos = Vector2Add(s->character_pos, Vector2Scale(s->character_speed, dt));
 
+  for (int i = -2; i <= 2; i++) {
+    for (int j = -2; j <= 2; j++) {
+      Vector2 center_of_rec;
+      center_of_rec.x = ceilf((s->character_pos.x + i * CHUNK_SIZE)/CHUNK_SIZE) * CHUNK_SIZE;
+      center_of_rec.y = ceilf((s->character_pos.y + j * CHUNK_SIZE)/CHUNK_SIZE) * CHUNK_SIZE;
+
+
+      if (hmgeti(s->chunk_loaded, center_of_rec) < 0) {
+        if (hmlen(s->chunk_loaded) + 1 > MAX_CHUNKS) {
+          unload_chunk();
+        }
+        stbds_hmput(s->chunk_loaded, center_of_rec, generate_chunk());
+      }
+    }
+  }
+
   BeginMode2D(s->camera);
 
-  DrawCircleLinesV(s->character_pos, s->load_radius, WHITE);
+  for (int i = -2; i <= 2; i++) {
+    for (int j = -2; j <= 2; j++) {
+      Vector2 center_of_rec;
+      center_of_rec.x = ceilf((s->character_pos.x + i * CHUNK_SIZE)/CHUNK_SIZE) * CHUNK_SIZE;
+      center_of_rec.y = ceilf((s->character_pos.y + j * CHUNK_SIZE)/CHUNK_SIZE) * CHUNK_SIZE;
+
+      // Render chunk objects
+    }
+  }
+
+  DrawCircleLinesV(s->character_pos, LOAD_RADIUS, WHITE);
   DrawCircleV(s->character_pos, s->character_size, RED);
   DrawCircleV(mouse_character_relative, s->cursor_size, RED);
 
@@ -229,4 +274,7 @@ void *game_pre_reload() {
 
 void game_post_reload(void *prevState) { s = prevState; }
 
-void game_close() { CloseAudioDevice(); }
+void game_close() { 
+  hmfree(s->chunk_loaded);
+  CloseAudioDevice();
+}
