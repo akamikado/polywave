@@ -11,11 +11,18 @@
 #define FFT_SIZE (1 << 13)
 
 typedef struct {
+  Vector2 center;
 } Map_Chunk;
+
+typedef struct Map_Chunk_List {
+  struct Map_Chunk_List* next;
+  struct Map_Chunk_List* prev;
+  Map_Chunk* value;
+} Map_Chunk_List;
 
 #define LOAD_RADIUS 750.0f
 #define CHUNK_SIZE 400.0f
-#define MAX_CHUNKS (size_t)(1024*1024 / sizeof(Map_Chunk))
+#define MAX_CHUNKS (size_t)(0.25*1024*1024 / sizeof(Map_Chunk))
 
 typedef struct {
   char *song;
@@ -36,20 +43,79 @@ typedef struct {
 
   struct {
     Vector2 key;
-    Map_Chunk* value;
+    Map_Chunk_List* value;
   }* chunk_loaded; 
+  struct {
+    Map_Chunk_List* head, *tail;
+  } chunks;
 } ReloadableState;
 
 static ReloadableState *s = NULL;
 
-static Map_Chunk* generate_chunk() {
-  Map_Chunk* c = malloc(sizeof(*c));
-  // Generate chunk objects
-  return c;
+static void unload_chunk() {
+  assert(hmlen(s->chunk_loaded) > 0);
+  Map_Chunk_List* least_priority_chunk = s->chunks.tail->prev;
+
+  least_priority_chunk->prev->next = s->chunks.tail;
+  s->chunks.tail->prev = least_priority_chunk->prev;
+
+  assert(hmdel(s->chunk_loaded, least_priority_chunk->value->center) == 1);
+  free(least_priority_chunk->value);
+  free(least_priority_chunk);
 }
 
-static void unload_chunk() {
-  // Unload chunk in LRU fashion
+static void generate_chunk(Vector2 key) {
+  if ((size_t)hmlen(s->chunk_loaded) + 1 > MAX_CHUNKS) {
+    unload_chunk();
+  }
+
+  Map_Chunk* chunk = malloc(sizeof(*chunk));
+  chunk->center = key;
+
+  // TODO: generate objects in chunk
+
+  Map_Chunk_List *head = s->chunks.head, *next = head->next;
+  Map_Chunk_List* new = malloc(sizeof(*new));
+  new->value = chunk;
+
+  head->next = new;
+  new->prev = head;
+
+  new->next = next;
+  next->prev = new;
+
+  hmput(s->chunk_loaded, key, new);
+}
+
+static void init_chunks() {
+  s->chunk_loaded = NULL;
+  s->chunks.head = malloc(sizeof(*(s->chunks.head)));
+  s->chunks.tail = malloc(sizeof(*(s->chunks.tail)));
+  s->chunks.head->next = s->chunks.tail;
+  s->chunks.head->prev = NULL;
+  s->chunks.tail->next = NULL;
+  s->chunks.tail->prev = s->chunks.head;
+}
+
+static void destroy_chunks() {
+  hmfree(s->chunk_loaded);
+  free(s->chunks.head);
+  free(s->chunks.tail);
+}
+
+static void update_chunk_priority(Vector2 key) {
+  if (hmlen(s->chunk_loaded) <= 1) return;
+
+  Map_Chunk_List* chunk = hmget(s->chunk_loaded, key);
+
+  chunk->prev->next = chunk->next;
+  chunk->next->prev = chunk->prev;
+
+  s->chunks.head->next->prev = chunk;
+  chunk->next = s->chunks.head->next;
+
+  s->chunks.head->next = chunk;
+  chunk->prev = s->chunks.head;
 }
 
 static void audio_callback(void *bufferData, unsigned int frames) {
@@ -197,7 +263,7 @@ void game_init() {
   s->character_size = 40.0f;
   s->cursor_size = 10.0f;
 
-  s->chunk_loaded = NULL;
+  init_chunks();
 }
 
 void game_update() {
@@ -240,10 +306,9 @@ void game_update() {
 
 
       if (hmgeti(s->chunk_loaded, center_of_rec) < 0) {
-        if (hmlen(s->chunk_loaded) + 1 > MAX_CHUNKS) {
-          unload_chunk();
-        }
-        stbds_hmput(s->chunk_loaded, center_of_rec, generate_chunk());
+        generate_chunk(center_of_rec);
+      } else {
+        update_chunk_priority(center_of_rec);
       }
     }
   }
@@ -252,11 +317,11 @@ void game_update() {
 
   for (int i = -2; i <= 2; i++) {
     for (int j = -2; j <= 2; j++) {
-      Vector2 center_of_rec;
-      center_of_rec.x = ceilf((s->character_pos.x + i * CHUNK_SIZE)/CHUNK_SIZE) * CHUNK_SIZE;
-      center_of_rec.y = ceilf((s->character_pos.y + j * CHUNK_SIZE)/CHUNK_SIZE) * CHUNK_SIZE;
+      // Vector2 center_of_rec;
+      // center_of_rec.x = ceilf((s->character_pos.x + i * CHUNK_SIZE)/CHUNK_SIZE) * CHUNK_SIZE;
+      // center_of_rec.y = ceilf((s->character_pos.y + j * CHUNK_SIZE)/CHUNK_SIZE) * CHUNK_SIZE;
 
-      // Render chunk objects
+      //TODO: Render chunk objects
     }
   }
 
@@ -268,13 +333,17 @@ void game_update() {
 }
 
 void *game_pre_reload() {
+  destroy_chunks();
   fft_clean();
   return s;
 }
 
-void game_post_reload(void *prevState) { s = prevState; }
+void game_post_reload(void *prevState) { 
+  s = prevState;
+  init_chunks();
+}
 
 void game_close() { 
-  hmfree(s->chunk_loaded);
+  destroy_chunks();
   CloseAudioDevice();
 }
