@@ -21,7 +21,7 @@ typedef struct Map_Chunk_List {
 } Map_Chunk_List;
 
 #define LOAD_RADIUS 750.0f
-#define CHUNK_SIZE 400.0f
+#define CHUNK_SIZE 540.0f
 #define MAX_CHUNKS (size_t)(0.25*1024*1024 / sizeof(Map_Chunk))
 
 typedef struct {
@@ -234,8 +234,8 @@ void fft_render(Rectangle bbox) {
   }
 }
 
-#define PLAYER_SPD 100
-
+#define PLAYER_SPD 225
+#define PLAYER_SIZE 40.0f
 
 void game_init() {
   SetTargetFPS(60);
@@ -260,7 +260,6 @@ void game_init() {
   s->camera.rotation = 0.0f;
   s->camera.zoom = 1.0f;
 
-  s->character_size = 40.0f;
   s->cursor_size = 10.0f;
 
   init_chunks();
@@ -289,9 +288,9 @@ void game_update() {
   Vector2 mouse_center_relative = Vector2Subtract(mouse, (Vector2){.x = WNDW_WIDTH / 2, .y = WNDW_HEIGHT / 2});
   Vector2 mouse_character_relative = Vector2Add(mouse_center_relative, s->character_pos);
 
-  if (Vector2Length(mouse_center_relative) > s->character_size) {
+  if (Vector2Length(mouse_center_relative) > PLAYER_SIZE) {
     s->character_speed.x = PLAYER_SPD * (mouse_center_relative.x / (WNDW_WIDTH / 2));
-    s->character_speed.y = PLAYER_SPD * (mouse_center_relative.y / (WNDW_WIDTH / 2));
+    s->character_speed.y = PLAYER_SPD * (mouse_center_relative.y / (WNDW_HEIGHT / 2));
   } else {
     s->character_speed.x = 0;
     s->character_speed.y = 0;
@@ -326,7 +325,7 @@ void game_update() {
   }
 
   DrawCircleLinesV(s->character_pos, LOAD_RADIUS, WHITE);
-  DrawCircleV(s->character_pos, s->character_size, RED);
+  DrawCircleV(s->character_pos, PLAYER_SIZE, RED);
   DrawCircleV(mouse_character_relative, s->cursor_size, RED);
 
   EndMode2D();
