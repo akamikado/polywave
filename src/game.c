@@ -1,10 +1,15 @@
-#include "game.h"
 #include <complex.h>
 #include <math.h>
-#include <raylib.h>
-#include <raymath.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+#include "game.h"
+
+#include <raylib.h>
+#include <raymath.h>
+
 #define STB_DS_IMPLEMENTATION
 #include "stb_ds.h"
 
@@ -12,6 +17,10 @@
 
 typedef struct {
   Vector2 center;
+  bool obj_generated;
+  struct {
+    int i, j;
+  } obj;
 } Map_Chunk;
 
 typedef struct Map_Chunk_List {
@@ -21,7 +30,8 @@ typedef struct Map_Chunk_List {
 } Map_Chunk_List;
 
 #define LOAD_RADIUS 750.0f
-#define CHUNK_SIZE 540.0f
+#define OBJ_SIZE 60.0f
+#define CHUNK_SIZE (3 * 3 * OBJ_SIZE)
 #define MAX_CHUNKS (size_t)(0.25*1024*1024 / sizeof(Map_Chunk))
 
 typedef struct {
@@ -64,15 +74,86 @@ static void unload_chunk() {
   free(least_priority_chunk);
 }
 
-static void generate_chunk(Vector2 key) {
+int chunks_generated = 0;
+
+static void generate_chunk(Vector2 center, bool generate_object) {
   if ((size_t)hmlen(s->chunk_loaded) + 1 > MAX_CHUNKS) {
     unload_chunk();
   }
 
   Map_Chunk* chunk = malloc(sizeof(*chunk));
-  chunk->center = key;
+  chunk->center = center;
+  chunk->obj_generated = false;
+  chunk->obj.i = -1;
+  chunk->obj.j = -1;
+  
+  if (generate_object && (rand() % 2 == 1)) {
+    bool objects[3][3];
+    memset(objects, true, sizeof(objects));
 
-  // TODO: generate objects in chunk
+    for (int i = -1; i <= 1; i++) {
+      for (int j = -1; j <= 1; j++) {
+        if (i == 0 && j == 0) continue;
+
+        Vector2 adj_chunk_center = Vector2Add(center, (Vector2){.x = i * CHUNK_SIZE, .y = j * CHUNK_SIZE});
+        if (hmgeti(s->chunk_loaded, adj_chunk_center) < 0) continue;
+
+        Map_Chunk* adj_chunk = hmget(s->chunk_loaded, adj_chunk_center)->value;
+
+        if (i < 0) {
+          if (j < 0) {
+            if (adj_chunk->obj.i == 2 && adj_chunk->obj.j == 2) objects[0][0] = false;
+          } else if (j == 0) {
+            if (adj_chunk->obj.i == 0 && adj_chunk->obj.j == 2) objects[0][0] = false;
+            else if (adj_chunk->obj.i == 1 && adj_chunk->obj.j == 2) objects[1][0] = 0;
+            else if (adj_chunk->obj.i == 2 && adj_chunk->obj.j == 2) objects[2][0] = 0;
+          } else if (j > 0) {
+            if (adj_chunk->obj.i == 0 && adj_chunk->obj.j == 2) objects[2][0] = 0;
+          }
+        } else if (i == 0) {
+          if (j < 0) {
+            if (adj_chunk->obj.i == 2 && adj_chunk->obj.j == 0) objects[0][0] = 0;
+            else if (adj_chunk->obj.i == 2 && adj_chunk->obj.j == 1) objects[0][1] = 0;
+            else if (adj_chunk->obj.i == 2 && adj_chunk->obj.j == 2) objects[0][2] = 0;
+          } else if (j > 0) {
+            if (adj_chunk->obj.i == 0 && adj_chunk->obj.j == 0) objects[2][0] = 0;
+            else if (adj_chunk->obj.i == 0 && adj_chunk->obj.j == 1) objects[2][1] = 0;
+            else if (adj_chunk->obj.i == 0 && adj_chunk->obj.j == 2) objects[2][2] = 0;
+          }
+        } else {
+          if (j < 0) {
+            if (adj_chunk->obj.i == 2 && adj_chunk->obj.j == 0) objects[0][2] = 0;
+          } else if (j == 0) {
+            if (adj_chunk->obj.i == 0 && adj_chunk->obj.j == 0) objects[0][2] = 0;
+            else if (adj_chunk->obj.i == 1 && adj_chunk->obj.j == 0) objects[1][2] = 0;
+            else if (adj_chunk->obj.i == 2 && adj_chunk->obj.j == 0) objects[2][2] = 0;
+          } else if (j > 0) {
+            if (adj_chunk->obj.i == 0 && adj_chunk->obj.j == 0) objects[2][2] = 0;
+          }
+        }
+      }
+    }
+
+    int remaining = 0;
+    for (int i = 0; i < 3; i++) {
+      for (int j = 0; j < 3; j++) {
+        remaining += objects[i][j];
+      }
+    }
+
+    int chosen = (rand() % remaining) + 1, k = 0;
+    for (int i = 0; i < 3; i++) {
+      for (int j = 0; j < 3; j++) {
+        if (objects[i][j]) k++;
+        if (chosen == k) {
+          chunk->obj.i = i;
+          chunk->obj.j = j;
+        }
+      }
+    }
+
+    chunk->obj_generated = true;
+  }
 
   Map_Chunk_List *head = s->chunks.head, *next = head->next;
   Map_Chunk_List* new = malloc(sizeof(*new));
@@ -84,7 +165,7 @@ static void generate_chunk(Vector2 key) {
   new->next = next;
   next->prev = new;
 
-  hmput(s->chunk_loaded, key, new);
+  hmput(s->chunk_loaded, center, new);
 }
 
 static void init_chunks() {
@@ -238,6 +319,8 @@ void fft_render(Rectangle bbox) {
 #define PLAYER_SIZE 40.0f
 
 void game_init() {
+  srand(time(NULL));
+
   SetTargetFPS(60);
 
   s = malloc(sizeof(ReloadableState));
@@ -300,12 +383,12 @@ void game_update() {
   for (int i = -2; i <= 2; i++) {
     for (int j = -2; j <= 2; j++) {
       Vector2 center_of_rec;
-      center_of_rec.x = ceilf((s->character_pos.x + i * CHUNK_SIZE)/CHUNK_SIZE) * CHUNK_SIZE;
-      center_of_rec.y = ceilf((s->character_pos.y + j * CHUNK_SIZE)/CHUNK_SIZE) * CHUNK_SIZE;
-
+      center_of_rec.x = ceilf((s->character_pos.x + i * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
+      center_of_rec.y = ceilf((s->character_pos.y + j * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
 
       if (hmgeti(s->chunk_loaded, center_of_rec) < 0) {
-        generate_chunk(center_of_rec);
+        generate_chunk(center_of_rec, true);
+        chunks_generated++;
       } else {
         update_chunk_priority(center_of_rec);
       }
@@ -316,11 +399,14 @@ void game_update() {
 
   for (int i = -2; i <= 2; i++) {
     for (int j = -2; j <= 2; j++) {
-      // Vector2 center_of_rec;
-      // center_of_rec.x = ceilf((s->character_pos.x + i * CHUNK_SIZE)/CHUNK_SIZE) * CHUNK_SIZE;
-      // center_of_rec.y = ceilf((s->character_pos.y + j * CHUNK_SIZE)/CHUNK_SIZE) * CHUNK_SIZE;
+      Vector2 center_of_rec;
+      center_of_rec.x = ceilf((s->character_pos.x + i * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
+      center_of_rec.y = ceilf((s->character_pos.y + j * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
 
-      //TODO: Render chunk objects
+      assert(hmgeti(s->chunk_loaded, center_of_rec) >= 0);
+      Map_Chunk* chunk = hmget(s->chunk_loaded, center_of_rec)->value;
+      if (chunk->obj_generated)
+        DrawRectangleV(Vector2Add(center_of_rec, (Vector2){.x = (chunk->obj.i - 1) * OBJ_SIZE, .y = (chunk->obj.j - 1) * OBJ_SIZE}), (Vector2){.x = OBJ_SIZE, .y = OBJ_SIZE}, BLUE);
     }
   }
 
