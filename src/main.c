@@ -35,6 +35,9 @@ void reload() {
 }
 
 int main(int argc, char **argv) {
+  (void)argc;
+  (void)argv;
+
   reload();
 
   game_init();

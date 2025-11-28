@@ -74,8 +74,6 @@ static void unload_chunk() {
   free(least_priority_chunk);
 }
 
-int chunks_generated = 0;
-
 static void generate_chunk(Vector2 center, bool generate_object) {
   if ((size_t)hmlen(s->chunk_loaded) + 1 > MAX_CHUNKS) {
     unload_chunk();
@@ -388,7 +386,6 @@ void game_update() {
 
       if (hmgeti(s->chunk_loaded, center_of_rec) < 0) {
         generate_chunk(center_of_rec, true);
-        chunks_generated++;
       } else {
         update_chunk_priority(center_of_rec);
       }
