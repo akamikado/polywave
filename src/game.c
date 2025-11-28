@@ -85,7 +85,7 @@ static void generate_chunk(Vector2 center, bool generate_object) {
   chunk->obj.i = -1;
   chunk->obj.j = -1;
   
-  if (generate_object && (rand() % 2 == 1)) {
+  if (generate_object && (rand() % 5 < 3) /*60% chance to generate*/) {
     bool objects[3][3];
     memset(objects, true, sizeof(objects));
 
