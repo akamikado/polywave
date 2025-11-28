@@ -34,6 +34,9 @@ typedef struct Map_Chunk_List {
 #define CHUNK_SIZE (3 * 3 * OBJ_SIZE)
 #define MAX_CHUNKS (size_t)(0.25*1024*1024 / sizeof(Map_Chunk))
 
+#define PLAYER_SPD 225
+#define PLAYER_SIZE 40.0f
+
 typedef struct {
   char *song;
   Wave wave;
@@ -197,6 +200,71 @@ static void update_chunk_priority(Vector2 key) {
   chunk->prev = s->chunks.head;
 }
 
+void calc_player_speed(Vector2 mouse_dist) {
+  if (Vector2Length(mouse_dist) > PLAYER_SIZE) {
+    s->character_speed.x = PLAYER_SPD * (mouse_dist.x / (WNDW_WIDTH / 2));
+    s->character_speed.y = PLAYER_SPD * (mouse_dist.y / (WNDW_HEIGHT / 2));
+
+    for (int i = -1; i <= 1; i++) {
+      for (int j = -1; j <= 1; j++) {
+        if (i != 0 && i == j) continue;
+
+        Vector2 center_of_rec;
+        center_of_rec.x = ceilf((s->character_pos.x + i * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
+        center_of_rec.y = ceilf((s->character_pos.y + j * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
+
+        if(hmgeti(s->chunk_loaded, center_of_rec) < 0) continue;
+
+        Map_Chunk* chunk = hmget(s->chunk_loaded, center_of_rec)->value;
+        Vector2 obj_center = Vector2Add(center_of_rec, (Vector2){.x = (chunk->obj.i - 1) * OBJ_SIZE, .y = (chunk->obj.j - 1) * OBJ_SIZE});
+
+        float factor = 1.1;
+        Vector2 verts[] = {
+          {.x = obj_center.x - OBJ_SIZE * 0.5 * factor, .y = obj_center.y - OBJ_SIZE * 0.5 * factor},
+          {.x = obj_center.x - OBJ_SIZE * 0.5 * factor, .y = obj_center.y + OBJ_SIZE * 0.5 * factor},
+          {.x = obj_center.x + OBJ_SIZE * 0.5 * factor, .y = obj_center.y - OBJ_SIZE * 0.5 * factor},
+          {.x = obj_center.x + OBJ_SIZE * 0.5 * factor, .y = obj_center.y + OBJ_SIZE * 0.5 * factor},
+        };
+
+        if (CheckCollisionCircleLine(s->character_pos, PLAYER_SIZE, verts[0], verts[1])) {
+          if (s->character_speed.x > 0) s->character_speed.x = 0;
+        } 
+        if (CheckCollisionCircleLine(s->character_pos, PLAYER_SIZE, verts[1], verts[3])) {
+          if (s->character_speed.y < 0) s->character_speed.y = 0;
+        } 
+        if (CheckCollisionCircleLine(s->character_pos, PLAYER_SIZE, verts[3], verts[2])) {
+          if (s->character_speed.x < 0) s->character_speed.x = 0;
+        } 
+        if (CheckCollisionCircleLine(s->character_pos, PLAYER_SIZE, verts[2], verts[0])) {
+          if (s->character_speed.y > 0) s->character_speed.y = 0;
+        } 
+        if (CheckCollisionPointCircle(verts[0], s->character_pos, PLAYER_SIZE)) {
+          if (s->character_speed.x > 0 && s->character_speed.y > 0) {
+            s->character_speed = Vector2Zero();
+          }
+        } 
+        if (CheckCollisionPointCircle(verts[1], s->character_pos, PLAYER_SIZE)) {
+          if (s->character_speed.x > 0 && s->character_speed.y < 0) {
+            s->character_speed = Vector2Zero();
+          }
+        } 
+        if (CheckCollisionPointCircle(verts[2], s->character_pos, PLAYER_SIZE)) {
+          if (s->character_speed.x < 0 && s->character_speed.y < 0) {
+            s->character_speed = Vector2Zero();
+          }
+        } 
+        if (CheckCollisionPointCircle(verts[3], s->character_pos, PLAYER_SIZE)) {
+          if (s->character_speed.x < 0 && s->character_speed.y > 0) {
+            s->character_speed = Vector2Zero();
+          }
+        }
+      }
+    }
+  } else {
+    s->character_speed = Vector2Zero();
+  }
+}
+
 static void audio_callback(void *bufferData, unsigned int frames) {
   float (*fs)[2] = bufferData;
 
@@ -313,9 +381,6 @@ void fft_render(Rectangle bbox) {
   }
 }
 
-#define PLAYER_SPD 225
-#define PLAYER_SIZE 40.0f
-
 void game_init() {
   srand(time(NULL));
 
@@ -369,13 +434,9 @@ void game_update() {
   Vector2 mouse_center_relative = Vector2Subtract(mouse, (Vector2){.x = WNDW_WIDTH / 2, .y = WNDW_HEIGHT / 2});
   Vector2 mouse_character_relative = Vector2Add(mouse_center_relative, s->character_pos);
 
-  if (Vector2Length(mouse_center_relative) > PLAYER_SIZE) {
-    s->character_speed.x = PLAYER_SPD * (mouse_center_relative.x / (WNDW_WIDTH / 2));
-    s->character_speed.y = PLAYER_SPD * (mouse_center_relative.y / (WNDW_HEIGHT / 2));
-  } else {
-    s->character_speed.x = 0;
-    s->character_speed.y = 0;
-  }
+
+  calc_player_speed(mouse_center_relative);
+
   s->character_pos = Vector2Add(s->character_pos, Vector2Scale(s->character_speed, dt));
 
   for (int i = -2; i <= 2; i++) {
@@ -402,8 +463,24 @@ void game_update() {
 
       assert(hmgeti(s->chunk_loaded, center_of_rec) >= 0);
       Map_Chunk* chunk = hmget(s->chunk_loaded, center_of_rec)->value;
-      if (chunk->obj_generated)
-        DrawRectangleV(Vector2Add(center_of_rec, (Vector2){.x = (chunk->obj.i - 1) * OBJ_SIZE, .y = (chunk->obj.j - 1) * OBJ_SIZE}), (Vector2){.x = OBJ_SIZE, .y = OBJ_SIZE}, BLUE);
+      if (chunk->obj_generated){
+        Vector2 obj_center = Vector2Add(center_of_rec, (Vector2){.x = (chunk->obj.i - 1) * OBJ_SIZE, .y = (chunk->obj.j - 1) * OBJ_SIZE});
+        Vector2 obj_corner = Vector2Subtract(obj_center, (Vector2){.x = OBJ_SIZE / 2, .y = OBJ_SIZE / 2});
+        DrawRectangleV(obj_corner, (Vector2){.x = OBJ_SIZE, .y = OBJ_SIZE}, BLUE);
+
+        #ifdef DISPLAY_COLLISION_LINES
+          Vector2 verts[] = {
+            {.x = obj_center.x - OBJ_SIZE * 0.55f, .y = obj_center.y - OBJ_SIZE * 0.55f},
+            {.x = obj_center.x - OBJ_SIZE * 0.55f, .y = obj_center.y + OBJ_SIZE * 0.55f},
+            {.x = obj_center.x + OBJ_SIZE * 0.55f, .y = obj_center.y - OBJ_SIZE * 0.55f},
+            {.x = obj_center.x + OBJ_SIZE * 0.55f, .y = obj_center.y + OBJ_SIZE * 0.55f},
+          };
+          DrawLineV(verts[0], verts[1], WHITE);
+          DrawLineV(verts[1], verts[3], WHITE);
+          DrawLineV(verts[3], verts[2], WHITE);
+          DrawLineV(verts[2], verts[0], WHITE);
+       #endif
+      }
     }
   }
 
