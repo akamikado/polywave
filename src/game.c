@@ -13,6 +13,10 @@
 #define STB_DS_IMPLEMENTATION
 #include "stb_ds.h"
 
+#define NOB_IMPLEMENTATION
+#define NOB_STRIP_PREFIX
+#include "../nob.h"
+
 #define FFT_SIZE (1 << 13)
 
 typedef struct {
@@ -30,9 +34,25 @@ typedef struct Map_Chunk_List {
 } Map_Chunk_List;
 
 #define LOAD_RADIUS 750.0f
+
 #define OBJ_SIZE 60.0f
+
 #define CHUNK_SIZE (3 * 3 * OBJ_SIZE)
 #define MAX_CHUNKS (size_t)(0.25*1024*1024 / sizeof(Map_Chunk))
+
+typedef struct {
+  Vector2 pos;
+  float rotation;
+} Enemy;
+
+typedef struct {
+  Enemy *items;
+  size_t count;
+  size_t capacity;
+} Enemies;
+
+#define ENEMY_SIZE 60.0f
+#define MAX_ENEMIES 50
 
 #define PLAYER_SPD 225
 #define PLAYER_SIZE 40.0f
@@ -61,6 +81,8 @@ typedef struct {
   struct {
     Map_Chunk_List* head, *tail;
   } chunks;
+
+  Enemies enemies;
 } ReloadableState;
 
 static ReloadableState *s = NULL;
@@ -216,6 +238,8 @@ void calc_player_speed(Vector2 mouse_dist) {
         if(hmgeti(s->chunk_loaded, center_of_rec) < 0) continue;
 
         Map_Chunk* chunk = hmget(s->chunk_loaded, center_of_rec)->value;
+        if (!chunk->obj_generated) continue;
+
         Vector2 obj_center = Vector2Add(center_of_rec, (Vector2){.x = (chunk->obj.i - 1) * OBJ_SIZE, .y = (chunk->obj.j - 1) * OBJ_SIZE});
 
         float factor = 1.1;
@@ -262,6 +286,20 @@ void calc_player_speed(Vector2 mouse_dist) {
     }
   } else {
     s->character_speed = Vector2Zero();
+  }
+}
+
+void generate_enemies() {
+  for (size_t i = 0; i < s->enemies.count; i++) {
+    if (!CheckCollisionPointCircle(s->enemies.items[i].pos, s->character_pos, LOAD_RADIUS)){
+      da_remove_unordered(&s->enemies, i);
+    }
+  }
+  // TODO: change this while loop to create enemies after certain period of time
+  while (s->enemies.count < MAX_ENEMIES) {
+    int spawn_pos_angle = (rand() % 360) * (M_PI / 180.0f);
+    Vector2 spawn_pos = {.x = s->character_pos.x + LOAD_RADIUS * cosf(spawn_pos_angle), .y = s->character_pos.y + LOAD_RADIUS * sinf(spawn_pos_angle)};
+    da_append(&s->enemies, ((Enemy){.pos = spawn_pos, .rotation = 0}));
   }
 }
 
@@ -409,6 +447,7 @@ void game_init() {
   s->cursor_size = 10.0f;
 
   init_chunks();
+  memset(&s->enemies, 0, sizeof(s->enemies));
 }
 
 void game_update() {
@@ -453,6 +492,8 @@ void game_update() {
     }
   }
 
+  generate_enemies();
+
   BeginMode2D(s->camera);
 
   for (int i = -2; i <= 2; i++) {
@@ -482,6 +523,20 @@ void game_update() {
        #endif
       }
     }
+  }
+
+  for (size_t i = 0; i < s->enemies.count; i++) {
+    double r = ENEMY_SIZE / sqrt(3.0);
+    double rot = s->enemies.items[i].rotation * M_PI / 180.0;
+    double angles_deg[3] = { 90.0, 210.0, 330.0 };
+
+    Vector2 verts[3];
+    for (int j = 0; j < 3; j++) {
+      double a = (angles_deg[j] * M_PI / 180.0) + rot;
+      verts[j].x = s->enemies.items[i].pos.x + r * cos(a);
+      verts[j].y = s->enemies.items[i].pos.y + r * sin(a);
+    }
+    DrawTriangle(verts[2], verts[1], verts[0], YELLOW);
   }
 
   DrawCircleLinesV(s->character_pos, LOAD_RADIUS, WHITE);
