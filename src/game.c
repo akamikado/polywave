@@ -536,7 +536,9 @@ void game_update() {
       verts[j].x = s->enemies.items[i].pos.x + r * cos(a);
       verts[j].y = s->enemies.items[i].pos.y + r * sin(a);
     }
-    DrawTriangle(verts[2], verts[1], verts[0], YELLOW);
+
+    DrawTriangle(verts[2], s->enemies.items[i].pos, verts[0], YELLOW);
+    DrawTriangle(verts[0], s->enemies.items[i].pos, verts[1], YELLOW);
   }
 
   DrawCircleLinesV(s->character_pos, LOAD_RADIUS, WHITE);
