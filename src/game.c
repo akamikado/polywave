@@ -1,4 +1,5 @@
 #include <complex.h>
+#include <limits.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -52,9 +53,10 @@ typedef struct {
 } Enemies;
 
 #define ENEMY_SIZE 60.0f
-#define MAX_ENEMIES 50
+#define MAX_ENEMIES 25
+#define MAX_ENEMY_SPD 150.0f
 
-#define PLAYER_SPD 225
+#define PLAYER_SPD 225.0f
 #define PLAYER_SIZE 40.0f
 
 typedef struct {
@@ -83,6 +85,8 @@ typedef struct {
   } chunks;
 
   Enemies enemies;
+  size_t max_enemies;
+  float enemy_speed;
 } ReloadableState;
 
 static ReloadableState *s = NULL;
@@ -222,18 +226,20 @@ static void update_chunk_priority(Vector2 key) {
   chunk->prev = s->chunks.head;
 }
 
-void calc_player_speed(Vector2 mouse_dist) {
+void calc_player_speed(float dt, Vector2 mouse_dist) {
   if (Vector2Length(mouse_dist) > PLAYER_SIZE) {
     s->character_speed.x = PLAYER_SPD * (mouse_dist.x / (WNDW_WIDTH / 2));
     s->character_speed.y = PLAYER_SPD * (mouse_dist.y / (WNDW_HEIGHT / 2));
+
+    Vector2 new_pos = Vector2Add(s->character_pos, Vector2Scale(s->character_speed, dt));
 
     for (int i = -1; i <= 1; i++) {
       for (int j = -1; j <= 1; j++) {
         if (i != 0 && i == j) continue;
 
         Vector2 center_of_rec;
-        center_of_rec.x = ceilf((s->character_pos.x + i * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
-        center_of_rec.y = ceilf((s->character_pos.y + j * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
+        center_of_rec.x = floorf((new_pos.x + i * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
+        center_of_rec.y = floorf((new_pos.y + j * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
 
         if(hmgeti(s->chunk_loaded, center_of_rec) < 0) continue;
 
@@ -241,25 +247,32 @@ void calc_player_speed(Vector2 mouse_dist) {
         if (!chunk->obj_generated) continue;
 
         Vector2 obj_center = Vector2Add(center_of_rec, (Vector2){.x = (chunk->obj.i - 1) * OBJ_SIZE, .y = (chunk->obj.j - 1) * OBJ_SIZE});
+        Vector2 obj_corner = Vector2Subtract(obj_center, (Vector2){.x = OBJ_SIZE / 2, .y = OBJ_SIZE / 2});
+        Rectangle obj = {
+          .x = obj_corner.x,
+          .y = obj_corner.y,
+          .width = OBJ_SIZE,
+          .height = OBJ_SIZE
+        };
 
         float factor = 1.1;
         Vector2 verts[] = {
           {.x = obj_center.x - OBJ_SIZE * 0.5 * factor, .y = obj_center.y - OBJ_SIZE * 0.5 * factor},
           {.x = obj_center.x - OBJ_SIZE * 0.5 * factor, .y = obj_center.y + OBJ_SIZE * 0.5 * factor},
-          {.x = obj_center.x + OBJ_SIZE * 0.5 * factor, .y = obj_center.y - OBJ_SIZE * 0.5 * factor},
           {.x = obj_center.x + OBJ_SIZE * 0.5 * factor, .y = obj_center.y + OBJ_SIZE * 0.5 * factor},
+          {.x = obj_center.x + OBJ_SIZE * 0.5 * factor, .y = obj_center.y - OBJ_SIZE * 0.5 * factor},
         };
 
-        if (CheckCollisionCircleLine(s->character_pos, PLAYER_SIZE, verts[0], verts[1])) {
+        if (CheckCollisionCircleLine(new_pos, PLAYER_SIZE, verts[0], verts[1])) {
           if (s->character_speed.x > 0) s->character_speed.x = 0;
         } 
-        if (CheckCollisionCircleLine(s->character_pos, PLAYER_SIZE, verts[1], verts[3])) {
+        if (CheckCollisionCircleLine(new_pos, PLAYER_SIZE, verts[1], verts[2])) {
           if (s->character_speed.y < 0) s->character_speed.y = 0;
         } 
-        if (CheckCollisionCircleLine(s->character_pos, PLAYER_SIZE, verts[3], verts[2])) {
+        if (CheckCollisionCircleLine(new_pos, PLAYER_SIZE, verts[2], verts[3])) {
           if (s->character_speed.x < 0) s->character_speed.x = 0;
         } 
-        if (CheckCollisionCircleLine(s->character_pos, PLAYER_SIZE, verts[2], verts[0])) {
+        if (CheckCollisionCircleLine(new_pos, PLAYER_SIZE, verts[3], verts[0])) {
           if (s->character_speed.y > 0) s->character_speed.y = 0;
         } 
         if (CheckCollisionPointCircle(verts[0], s->character_pos, PLAYER_SIZE)) {
@@ -282,6 +295,14 @@ void calc_player_speed(Vector2 mouse_dist) {
             s->character_speed = Vector2Zero();
           }
         }
+        if (CheckCollisionPointRec(new_pos, obj)) {
+          Vector2 dir = Vector2Normalize(Vector2Subtract(s->character_pos, obj_center));
+          if (dir.x == 0 && dir.y == 0) {
+            dir = (Vector2) {.x = 1, .y = 0};
+          }
+          s->character_speed.x = dir.x * PLAYER_SPD;
+          s->character_speed.y = dir.y * PLAYER_SPD;
+        }
       }
     }
   } else {
@@ -296,10 +317,172 @@ void generate_enemies() {
     }
   }
   // TODO: change this while loop to create enemies after certain period of time
-  while (s->enemies.count < MAX_ENEMIES) {
+  while (s->enemies.count < s->max_enemies) {
     int spawn_pos_angle = (rand() % 360) * (M_PI / 180.0f);
     Vector2 spawn_pos = {.x = s->character_pos.x + LOAD_RADIUS * cosf(spawn_pos_angle), .y = s->character_pos.y + LOAD_RADIUS * sinf(spawn_pos_angle)};
     da_append(&s->enemies, ((Enemy){.pos = spawn_pos, .rotation = 0}));
+  }
+}
+
+void calc_enemy_position(float dt, size_t GRID_SIZE, bool occupied[GRID_SIZE][GRID_SIZE]) {
+  typedef struct {
+    int x, y;
+  } Cell;
+
+  Vector2 player_chunk = {.x = floorf(s->character_pos.x / CHUNK_SIZE) * CHUNK_SIZE, .y = floorf(s->character_pos.y / CHUNK_SIZE) * CHUNK_SIZE};
+  Vector2 grid_corner = {.x = player_chunk.x - 2 * CHUNK_SIZE, .y = player_chunk.y - 2 * CHUNK_SIZE};
+  Cell player_cell = {.x = floor((s->character_pos.x - grid_corner.x) / OBJ_SIZE), .y = floor((s->character_pos.y - grid_corner.y) / OBJ_SIZE)};
+
+
+  int distance[GRID_SIZE][GRID_SIZE];
+  for (size_t i = 0; i < GRID_SIZE; i++) {
+    for (size_t j = 0; j < GRID_SIZE; j++) {
+      distance[i][j] = -1; 
+    }
+  }
+
+  struct {
+    Cell* items;
+    size_t count;
+    size_t capacity;
+  } queue = {0};
+
+  bool visited[GRID_SIZE][GRID_SIZE];
+  memset(visited, 0, sizeof(visited));
+
+  da_append(&queue, player_cell);
+  visited[player_cell.y][player_cell.x] = true;
+  distance[player_cell.y][player_cell.x] = 0;
+
+  int neighbors[8][2] = {
+    {1, 0}, {-1, 0},
+    {0, 1}, {0, -1},
+    {1, 1}, {-1, 1},
+    {1, -1}, {-1, -1}
+  };
+
+  while (queue.count > 0) {
+    Cell c = queue.items[0];
+    da_remove_unordered(&queue, 0);
+
+    for (int k=0;k<8;k++) {
+      int nx = c.x + neighbors[k][0];
+      int ny = c.y + neighbors[k][1];
+
+      if (nx < 0 || ny < 0 || (size_t)nx >= GRID_SIZE || (size_t)ny >= GRID_SIZE)
+        continue;
+
+      if (occupied[ny][nx])
+        continue;
+
+      if (!visited[ny][nx]) {
+        visited[ny][nx] = true;
+        distance[ny][nx] = distance[c.y][c.x] + 1;
+        da_append(&queue, ((Cell){nx, ny}));
+      }
+    }
+  }
+
+  for (size_t i = 0; i < s->enemies.count; i++) {
+    Cell enemy_cell = {
+      .x = floor((s->enemies.items[i].pos.x - grid_corner.x) / OBJ_SIZE),
+      .y = floor((s->enemies.items[i].pos.y - grid_corner.y) / OBJ_SIZE),
+    };
+
+    Cell best = enemy_cell;
+    int best_dist = distance[enemy_cell.y][enemy_cell.x];
+
+    for (int k = 0; k < 8; k++) {
+      int nx = enemy_cell.x + neighbors[k][0];
+      int ny = enemy_cell.y + neighbors[k][1];
+
+      if (nx < 0 || ny < 0 || (size_t)nx >= GRID_SIZE || (size_t)ny >= GRID_SIZE)
+        continue;
+
+      if (distance[ny][nx] != -1 && distance[ny][nx] < best_dist) {
+        best_dist = distance[ny][nx];
+        best.x = nx;
+        best.y = ny;
+      }
+    }
+
+    Vector2 target = {
+      .x = grid_corner.x + best.x * OBJ_SIZE + OBJ_SIZE * 0.5f,
+      .y = grid_corner.y + best.y * OBJ_SIZE + OBJ_SIZE * 0.5f
+    };
+    Vector2 dir = Vector2Subtract(target, s->enemies.items[i].pos);
+    dir = Vector2Normalize(dir);
+
+    Vector2 separation = {0, 0};
+    float desired = 40.0f;
+
+
+    for (size_t j=0; j<s->enemies.count; j++) {
+        if (i == j) continue;
+
+        Vector2 diff = Vector2Subtract(s->enemies.items[i].pos, s->enemies.items[j].pos);
+        float d = Vector2Length(diff);
+
+        if (d > 0 && d < desired) {
+            Vector2 push = Vector2Scale(Vector2Normalize(diff),
+                                        (desired - d) / desired);
+            separation = Vector2Add(separation, push);
+        }
+    }
+    separation = Vector2Normalize(Vector2Scale(separation, 50.0f));
+
+    Vector2 velocity = Vector2Scale(Vector2Normalize(Vector2Add(dir, separation)), s->enemy_speed);
+    Vector2 new_pos = Vector2Add(s->enemies.items[i].pos, Vector2Scale(velocity, dt));
+
+    Cell new_cell = {
+      .x = floor((new_pos.x - grid_corner.x) / OBJ_SIZE),
+      .y = floor((new_pos.y - grid_corner.y) / OBJ_SIZE)
+    };
+
+    if (new_cell.x >= 0 && 
+      (size_t)new_cell.x < GRID_SIZE && 
+      new_cell.y >= 0 && 
+      (size_t)new_cell.y < GRID_SIZE && 
+      !occupied[new_cell.y][new_cell.x]){
+        s->enemies.items[i].pos = new_pos;
+    } else {
+      Vector2 alt = s->enemies.items[i].pos;
+
+      Vector2 testX = { s->enemies.items[i].pos.x + velocity.x * dt,
+                        s->enemies.items[i].pos.y };
+      Cell alt_cell = {
+        .x = floor((testX.x - grid_corner.x) / OBJ_SIZE),
+        .y = floor((testX.y - grid_corner.y) / OBJ_SIZE)
+      };
+      if (alt_cell.x >= 0 && 
+          (size_t)alt_cell.x < GRID_SIZE && 
+          alt_cell.y >= 0 && 
+          (size_t)alt_cell.y < GRID_SIZE &&
+          !occupied[alt_cell.y][alt_cell.x]){
+          alt = testX;
+        }
+
+      Vector2 testY = { s->enemies.items[i].pos.x,
+                        s->enemies.items[i].pos.y + velocity.y * dt };
+      alt_cell = (Cell) {
+        .x = floor((testY.x - grid_corner.x) / OBJ_SIZE),
+        .y = floor((testY.y - grid_corner.y) / OBJ_SIZE)
+      };
+      if (alt_cell.x >= 0 && 
+          (size_t)alt_cell.x < GRID_SIZE && 
+          alt_cell.y >= 0 && 
+          (size_t)alt_cell.y < GRID_SIZE &&
+          !occupied[alt_cell.y][alt_cell.x]) {
+          alt = testY;
+        }
+
+      s->enemies.items[i].pos = alt;
+    }
+
+
+    Vector2 dist_to_player = Vector2Subtract(s->character_pos, s->enemies.items[i].pos);
+    float angle = atan2(dist_to_player.y, dist_to_player.x);
+    s->enemies.items[i].rotation = (angle * 180.0 / M_PI) - 90.0f;
   }
 }
 
@@ -436,7 +619,7 @@ void game_init() {
   s->wave = LoadWave(s->song);
   s->music = LoadMusicStream(s->song);
   fft_clean();
-  /* PlayMusicStream(s->music); */
+  // PlayMusicStream(s->music);
   AttachAudioStreamProcessor(s->music.stream, audio_callback);
 
   s->camera.offset = (Vector2){.x = WNDW_WIDTH / 2, .y = WNDW_HEIGHT / 2};
@@ -447,7 +630,10 @@ void game_init() {
   s->cursor_size = 10.0f;
 
   init_chunks();
+
+  s->max_enemies = MAX_ENEMIES;
   memset(&s->enemies, 0, sizeof(s->enemies));
+  s->enemy_speed = MAX_ENEMY_SPD;
 }
 
 void game_update() {
@@ -474,33 +660,40 @@ void game_update() {
   Vector2 mouse_character_relative = Vector2Add(mouse_center_relative, s->character_pos);
 
 
-  calc_player_speed(mouse_center_relative);
+  calc_player_speed(dt, mouse_center_relative);
 
   s->character_pos = Vector2Add(s->character_pos, Vector2Scale(s->character_speed, dt));
+
+  size_t GRID_SIZE = 5 * (CHUNK_SIZE / OBJ_SIZE);
+  bool object_placed[GRID_SIZE][GRID_SIZE];
+  memset(object_placed, 0, sizeof(object_placed));
 
   for (int i = -2; i <= 2; i++) {
     for (int j = -2; j <= 2; j++) {
       Vector2 center_of_rec;
-      center_of_rec.x = ceilf((s->character_pos.x + i * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
-      center_of_rec.y = ceilf((s->character_pos.y + j * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
+      center_of_rec.x = floorf((s->character_pos.x + i * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
+      center_of_rec.y = floorf((s->character_pos.y + j * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
 
       if (hmgeti(s->chunk_loaded, center_of_rec) < 0) {
         generate_chunk(center_of_rec, true);
       } else {
         update_chunk_priority(center_of_rec);
       }
+      Map_Chunk* chunk = hmget(s->chunk_loaded, center_of_rec)->value;
+      object_placed[(int)((2 + i) * (CHUNK_SIZE / OBJ_SIZE) + chunk->obj.i)][(int)((2 + j) * (CHUNK_SIZE / OBJ_SIZE) + chunk->obj.j)] = true;
     }
   }
 
   generate_enemies();
+  calc_enemy_position(dt, GRID_SIZE, object_placed);
 
   BeginMode2D(s->camera);
 
   for (int i = -2; i <= 2; i++) {
     for (int j = -2; j <= 2; j++) {
       Vector2 center_of_rec;
-      center_of_rec.x = ceilf((s->character_pos.x + i * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
-      center_of_rec.y = ceilf((s->character_pos.y + j * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
+      center_of_rec.x = floorf((s->character_pos.x + i * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
+      center_of_rec.y = floorf((s->character_pos.y + j * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
 
       assert(hmgeti(s->chunk_loaded, center_of_rec) >= 0);
       Map_Chunk* chunk = hmget(s->chunk_loaded, center_of_rec)->value;
@@ -513,13 +706,13 @@ void game_update() {
           Vector2 verts[] = {
             {.x = obj_center.x - OBJ_SIZE * 0.55f, .y = obj_center.y - OBJ_SIZE * 0.55f},
             {.x = obj_center.x - OBJ_SIZE * 0.55f, .y = obj_center.y + OBJ_SIZE * 0.55f},
-            {.x = obj_center.x + OBJ_SIZE * 0.55f, .y = obj_center.y - OBJ_SIZE * 0.55f},
             {.x = obj_center.x + OBJ_SIZE * 0.55f, .y = obj_center.y + OBJ_SIZE * 0.55f},
+            {.x = obj_center.x + OBJ_SIZE * 0.55f, .y = obj_center.y - OBJ_SIZE * 0.55f},
           };
           DrawLineV(verts[0], verts[1], WHITE);
-          DrawLineV(verts[1], verts[3], WHITE);
-          DrawLineV(verts[3], verts[2], WHITE);
-          DrawLineV(verts[2], verts[0], WHITE);
+          DrawLineV(verts[1], verts[2], WHITE);
+          DrawLineV(verts[2], verts[3], WHITE);
+          DrawLineV(verts[3], verts[0], WHITE);
        #endif
       }
     }
