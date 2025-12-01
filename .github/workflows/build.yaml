@@ -1,0 +1,35 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install MSYS2 with UCRT64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-make
+            mingw-w64-ucrt-x86_64-pkg-config
+
+      - name: Build and run nob
+        shell: msys2 {0}
+        run: |
+          gcc nob.c -o nob
+          ./nob
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: polywave-windows
+          path: build/polywave.exe
