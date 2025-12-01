@@ -12,17 +12,21 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Build nob
-      shell: cmd
-      run: |
-        call "C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Auxiliary\\Build\\vcvars64.bat"
-        cl.exe /Fenob nob.c
+    - name: Install MSYS2 with UCRT64
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: UCRT64
+        update: true
+        install: >
+          mingw-w64-ucrt-x86_64-gcc
+          mingw-w64-ucrt-x86_64-make
+          mingw-w64-ucrt-x86_64-pkg-config
 
-    - name: Run nob
-      shell: cmd
+    - name: Build and run nob
+      shell: msys2 {0}
       run: |
-        call "C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\VC\\Auxiliary\\Build\\vcvars64.bat"
-        nob.exe
+        gcc nob.c -o nob
+        ./nob
 
     - name: Upload executable
       uses: actions/upload-artifact@v4
