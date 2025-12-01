@@ -1,0 +1,33 @@
+name: Windows Build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install MSYS2
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: UCRT64
+        update: true
+        install: >
+          mingw-w64-ucrt-x86_64-gcc
+
+    - name: Build game
+      shell: msys2 {0}
+      run: |
+        gcc -o nob.exe nob.c 
+        nob.exe
+
+    - name: Upload executable
+      uses: actions/upload-artifact@v4
+      with:
+        name: polywave-windows
+        path: polywave.exe
