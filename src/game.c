@@ -7,6 +7,7 @@
 #include <time.h>
 
 #include "game.h"
+#include "config.h"
 
 #include <raylib.h>
 #include <raymath.h>
@@ -23,6 +24,7 @@
 #define TIMER_THICKNESS 20.0f
 
 #define FFT_SIZE (1 << 13)
+#define NUM_BARS 40
 
 #define LOAD_RADIUS 750.0f
 
@@ -33,15 +35,21 @@
 #define CHUNK_SIZE (3 * 3 * OBJ_SIZE)
 #define MAX_CHUNKS (size_t)(0.25*1024*1024 / sizeof(Map_Chunk))
 
+#define MAX_FUEL_PER_CHUNK 35
+#define FUEL_SIZE 3.0f
+#define FUEL_COLOR GREEN
+#define FUEL_PICKUP_REWARD 0.05f
+
 #define ENEMY_COLOR YELLOW
 #define ENEMY_SIZE 60.0f
 #define MAX_ENEMIES 25
-#define MAX_ENEMY_SPD 150.0f
+#define ENEMY_SPD 150.0f
+#define ENEMY_DEFEAT_REWARD 0.8f
 
 #define PLAYER_NORMAL_SPD 225.0f
 #define PLAYER_BOOST_SPD 750.0f
 #define PLAYER_SIZE 40.0f
-#define BOOST_TIME 5.0f
+#define BOOST_TIME 600.0f
 
 typedef struct {
   Vector2 center;
@@ -49,6 +57,11 @@ typedef struct {
   struct {
     int i, j;
   } obj;
+  struct {
+    Vector2* items;
+    size_t count;
+    size_t capacity;
+  } fuel;
 } Map_Chunk;
 
 typedef struct Map_Chunk_List {
@@ -68,8 +81,16 @@ typedef struct {
   size_t capacity;
 } Enemies;
 
+typedef enum {
+  GAME_PLAYING,
+  GAME_LOST,
+  GAME_WON
+} Game_State;
 
 typedef struct {
+  bool displaying;
+  Game_State state;
+
   float time;
 
   char *song;
@@ -82,15 +103,16 @@ typedef struct {
   float out[FFT_SIZE];
   size_t out_cnt;
 
-  float fuel_percent;
-
   Camera2D camera;
+
+  float cursor_size;
 
   Vector2 character_pos;
   float character_size;
   Vector2 character_speed;
-  float cursor_size;
   bool boost_mode;
+  float boost_speed;
+  float fuel_percent;
 
   struct {
     Vector2 key;
@@ -99,10 +121,11 @@ typedef struct {
   struct {
     Map_Chunk_List* head, *tail;
   } chunks;
+  size_t fuel_per_chunk;
+
 
   Enemies enemies;
   size_t max_enemies;
-  float enemy_speed;
 } State;
 
 static State *s = NULL;
@@ -214,6 +237,19 @@ static void generate_chunk(Vector2 center, bool generate_object) {
     chunk->obj_generated = true;
   }
 
+  size_t num_fuel = rand() % s->fuel_per_chunk;
+  Vector2 corner = Vector2Subtract(center, (Vector2){.x = CHUNK_SIZE / 2, .y = CHUNK_SIZE / 2});
+  memset(&chunk->fuel, 0, sizeof(chunk->fuel));
+
+  for(size_t i = 0; i < num_fuel; i++) {
+    Vector2 pos = {
+      .x = corner.x + rand() % (size_t)CHUNK_SIZE,
+      .y = corner.y + rand() % (size_t)CHUNK_SIZE
+    };
+
+    da_append(&chunk->fuel, pos);
+  }
+
   Map_Chunk_List *head = s->chunks.head, *next = head->next;
   Map_Chunk_List* new = malloc(sizeof(*new));
   new->value = chunk;
@@ -258,7 +294,7 @@ static void load_chunks() {
   }
 }
 
-void draw_objects() {
+void draw_chunk() {
   for (int i = -2; i <= 2; i++) {
     for (int j = -2; j <= 2; j++) {
       Vector2 center_of_rec;
@@ -284,6 +320,11 @@ void draw_objects() {
           DrawLineV(verts[2], verts[3], WHITE);
           DrawLineV(verts[3], verts[0], WHITE);
        #endif
+
+      }
+
+      for (size_t i = 0; i < chunk->fuel.count; i++) {
+          DrawCircleV(chunk->fuel.items[i], FUEL_SIZE, FUEL_COLOR);
       }
     }
   }
@@ -293,8 +334,8 @@ static void calc_player_speed(float dt, Vector2 mouse_dist) {
   if (Vector2Length(mouse_dist) > PLAYER_SIZE) {
     if (s->boost_mode) {
       Vector2 mouse_dir = Vector2Normalize(mouse_dist);
-      s->character_speed.x = PLAYER_BOOST_SPD * mouse_dir.x;
-      s->character_speed.y = PLAYER_BOOST_SPD * mouse_dir.y;
+      s->character_speed.x = s->boost_speed * mouse_dir.x;
+      s->character_speed.y = s->boost_speed * mouse_dir.y;
     } else {
       s->character_speed.x = PLAYER_NORMAL_SPD * (mouse_dist.x / (WNDW_WIDTH / 2));
       s->character_speed.y = PLAYER_NORMAL_SPD * (mouse_dist.y / (WNDW_HEIGHT / 2));
@@ -304,8 +345,6 @@ static void calc_player_speed(float dt, Vector2 mouse_dist) {
 
     for (int i = -1; i <= 1; i++) {
       for (int j = -1; j <= 1; j++) {
-        if (i != 0 && i == j) continue;
-
         Vector2 center_of_rec;
         center_of_rec.x = floorf((new_pos.x + i * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
         center_of_rec.y = floorf((new_pos.y + j * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
@@ -523,7 +562,7 @@ void calc_enemy_position(float dt) {
     }
     separation = Vector2Normalize(Vector2Scale(separation, 50.0f));
 
-    Vector2 velocity = Vector2Scale(Vector2Normalize(Vector2Add(dir, separation)), s->enemy_speed);
+    Vector2 velocity = Vector2Scale(Vector2Normalize(Vector2Add(dir, separation)), ENEMY_SPD);
     Vector2 new_pos = Vector2Add(s->enemies.items[i].pos, Vector2Scale(velocity, dt));
 
     Cell new_cell = {
@@ -594,6 +633,79 @@ void draw_enemies() {
     DrawTriangle(verts[2], s->enemies.items[i].pos, verts[0], ENEMY_COLOR);
     DrawTriangle(verts[0], s->enemies.items[i].pos, verts[1], ENEMY_COLOR);
   }
+}
+
+void check_enemy_collision() {
+  for (size_t i = 0; i < s->enemies.count; i++) {
+    double r = ENEMY_SIZE / sqrt(3.0);
+    double rot = s->enemies.items[i].rotation * M_PI / 180.0;
+    double angles_deg[3] = { 90.0, 210.0, 330.0 };
+
+    Vector2 verts[3];
+    for (int j = 0; j < 3; j++) {
+      double a = (angles_deg[j] * M_PI / 180.0) + rot;
+      verts[j].x = s->enemies.items[i].pos.x + r * cos(a);
+      verts[j].y = s->enemies.items[i].pos.y + r * sin(a);
+    }
+
+    if (s->boost_mode) {
+      if (CheckCollisionCircleLine(s->character_pos, PLAYER_SIZE, verts[0], verts[1]) ||
+        CheckCollisionCircleLine(s->character_pos, PLAYER_SIZE, verts[1], verts[2]) ||
+        CheckCollisionCircleLine(s->character_pos, PLAYER_SIZE, verts[2], verts[0]) ||
+        CheckCollisionPointTriangle(s->character_pos, verts[0], verts[1], verts[2])) {
+        da_remove_unordered(&s->enemies, i);
+        s->fuel_percent += ENEMY_DEFEAT_REWARD;
+        s->fuel_percent = s->fuel_percent > 1 ? 1 : s->fuel_percent;
+      }
+    } else {
+      if (CheckCollisionPointCircle(verts[0], s->character_pos, PLAYER_SIZE)) {
+        s->state = GAME_LOST;
+      }
+    }
+  }
+}
+
+void check_fuel_collision() {
+  for (int i = -1; i <= 1; i++) {
+    for (int j = -1; j <= 1; j++) {
+      Vector2 center_of_rec;
+      center_of_rec.x = floorf((s->character_pos.x + i * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
+      center_of_rec.y = floorf((s->character_pos.y + j * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
+
+      if(hmgeti(s->chunk_loaded, center_of_rec) < 0) continue;
+
+      Map_Chunk* chunk = hmget(s->chunk_loaded, center_of_rec)->value;
+
+      size_t i = 0;
+      while (i < chunk->fuel.count) {
+        if (CheckCollisionCircles(
+            s->character_pos, PLAYER_SIZE, chunk->fuel.items[i], FUEL_SIZE)) {
+          s->fuel_percent += FUEL_PICKUP_REWARD;
+          s->fuel_percent = s->fuel_percent > 1 ? 1 : s->fuel_percent;
+          chunk->fuel.items[i] = chunk->fuel.items[chunk->fuel.count - 1];
+          chunk->fuel.count--;
+        } else {
+          i++;
+        }
+      }
+    }
+  }
+}
+
+void calc_boost_speed() {
+  size_t amp_per_bar = floor(s->out_cnt / NUM_BARS);
+  float sum = 0.0f;
+  for (int i = 0; i < floor(NUM_BARS * s->fuel_percent); i++) {
+    float avg_amp = 0.0f;
+    for (size_t j = 0; i * amp_per_bar + j < s->out_cnt && j < amp_per_bar; j++) {
+      avg_amp += s->out[i * amp_per_bar + j];
+    }
+    avg_amp /= amp_per_bar;
+    sum += avg_amp;
+  }
+  sum = sum > 1 ? 1 : sum;
+  s->boost_speed = sum * PLAYER_BOOST_SPD;
+  s->boost_speed = s->boost_speed < PLAYER_NORMAL_SPD ? PLAYER_NORMAL_SPD : s->boost_speed;
 }
 
 static void audio_callback(void *bufferData, unsigned int frames) {
@@ -698,12 +810,11 @@ void fft_analyze() {
 }
 
 void fft_render(Rectangle bbox, float displayable) {
-  int num_bars = 40;
-  size_t amp_per_bar = floor(s->out_cnt / num_bars);
-  float rec_width = bbox.width / (num_bars * 2);
-  float gap_between_bars = bbox.width / (num_bars * 2);
+  size_t amp_per_bar = floor(s->out_cnt / NUM_BARS);
+  float rec_width = bbox.width / (NUM_BARS * 2);
+  float gap_between_bars = bbox.width / (NUM_BARS * 2);
 
-  for (int i = 0; i < floor(num_bars * displayable); i++) {
+  for (int i = 0; i < floor(NUM_BARS * displayable); i++) {
     float avg_amp = 0.0f;
     for (size_t j = 0; i * amp_per_bar + j < s->out_cnt && j < amp_per_bar; j++) {
       avg_amp += s->out[i * amp_per_bar + j];
@@ -725,6 +836,9 @@ void game_init() {
   s = malloc(sizeof(State));
   memset(s, 0, sizeof(*s)); 
 
+  s->displaying = true;
+  s->state = GAME_PLAYING;
+
   InitAudioDevice();
   s->song = strdup("build/bfg_division.mp3");
   /* s->song = strdup("build/In-the-Dead-of-Night.ogg"); */
@@ -738,6 +852,7 @@ void game_init() {
   AttachAudioStreamProcessor(s->music.stream, audio_callback);
 
   s->fuel_percent = 1.0f;
+  s->fuel_per_chunk = MAX_FUEL_PER_CHUNK;
 
   s->camera.offset = (Vector2){.x = WNDW_WIDTH / 2, .y = WNDW_HEIGHT / 2};
   s->camera.target = s->character_pos;
@@ -750,7 +865,6 @@ void game_init() {
 
   s->max_enemies = MAX_ENEMIES;
   memset(&s->enemies, 0, sizeof(s->enemies));
-  s->enemy_speed = MAX_ENEMY_SPD;
 }
 
 void camera_init() {
@@ -758,62 +872,91 @@ void camera_init() {
   s->camera.target = s->character_pos;
 }
 
-void game_update() {
+bool game_update() {
   float w = GetScreenWidth();
   float h = GetScreenHeight();
   float dt = GetFrameTime();
 
-  s->time += dt;
-
   HideCursor();
-
-  camera_init();
 
   ClearBackground(BG_COLOR);
 
-  if (IsMusicStreamPlaying(s->music)) {
-    UpdateMusicStream(s->music);
-    fft_analyze();
+  switch (s->state) {
+    case GAME_PLAYING:
+      {
+        s->time += dt;
+
+        if (s->time >= GAME_TIME) {
+          s->state = GAME_WON;
+        }
+
+
+        camera_init();
+
+        if (IsMusicStreamPlaying(s->music)) {
+          UpdateMusicStream(s->music);
+          fft_analyze();
+        }
+
+        Vector2 mouse = GetMousePosition();
+        Vector2 mouse_center_relative = Vector2Subtract(mouse, (Vector2){.x = WNDW_WIDTH / 2, .y = WNDW_HEIGHT / 2});
+        Vector2 mouse_character_relative = Vector2Add(mouse_center_relative, s->character_pos);
+
+        if(IsKeyDown(KEY_SPACE) && s->fuel_percent > 0) {
+          s->boost_mode = true;
+          s->fuel_percent -= dt;
+          calc_boost_speed();
+        } else {
+          s->boost_mode = false;
+        }
+
+        calc_player_pos(dt, mouse_center_relative);
+
+        load_chunks();
+
+        generate_enemies(dt);
+        calc_enemy_position(dt);
+
+        check_enemy_collision();
+
+        check_fuel_collision();
+
+        BeginMode2D(s->camera);
+
+        draw_chunk();
+        draw_enemies();
+
+        #ifdef DISPLAY_LOAD_RADIUS
+          DrawCircleLinesV(s->character_pos, LOAD_RADIUS, WHITE);
+        #endif
+
+        DrawCircleV(s->character_pos, PLAYER_SIZE, RED);
+        DrawCircleV(mouse_character_relative, s->cursor_size, RED);
+
+        EndMode2D();
+
+        if (IsMusicStreamPlaying(s->music)) {
+          Rectangle bbox = {.x = w - 225, .y = h - 175, .width = 200, .height = 150};
+          fft_render(bbox, s->fuel_percent);
+        }
+
+        float timer_length = (s->time / GAME_TIME) * w;
+        DrawLineEx((Vector2){.x = 0, .y = h}, (Vector2){.x = timer_length, .y = h}, TIMER_THICKNESS, TIMER_COLOR);
+      }
+      break;
+    case GAME_WON:
+      {
+        // TODO
+      }
+      break;
+    case GAME_LOST:
+      {
+        // TODO
+      }
+      break;
   }
 
-  Vector2 mouse = GetMousePosition();
-  Vector2 mouse_center_relative = Vector2Subtract(mouse, (Vector2){.x = WNDW_WIDTH / 2, .y = WNDW_HEIGHT / 2});
-  Vector2 mouse_character_relative = Vector2Add(mouse_center_relative, s->character_pos);
-
-  if(IsKeyDown(KEY_SPACE)) {
-    s->boost_mode = true;
-  } else {
-    s->boost_mode = false;
-  }
-
-  calc_player_pos(dt, mouse_center_relative);
-
-  load_chunks();
-
-  generate_enemies(dt);
-  calc_enemy_position(dt);
-
-  BeginMode2D(s->camera);
-
-  draw_objects();
-  draw_enemies();
-
-  #ifdef DISPLAY_LOAD_RADIUS
-    DrawCircleLinesV(s->character_pos, LOAD_RADIUS, WHITE);
-  #endif
-
-  DrawCircleV(s->character_pos, PLAYER_SIZE, RED);
-  DrawCircleV(mouse_character_relative, s->cursor_size, RED);
-
-  EndMode2D();
-
-  if (IsMusicStreamPlaying(s->music)) {
-    Rectangle bbox = {.x = w - 225, .y = h - 175, .width = 200, .height = 150};
-    fft_render(bbox, s->fuel_percent);
-  }
-
-  float timer_length = (s->time / GAME_TIME) * w;
-  DrawLineEx((Vector2){.x = 0, .y = h}, (Vector2){.x = timer_length, .y = h}, TIMER_THICKNESS, TIMER_COLOR);
+  return s->displaying;
 }
 
 void game_close() { 

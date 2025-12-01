@@ -15,7 +15,7 @@ int main(int argc, char **argv) {
   InitWindow(WNDW_WIDTH, WNDW_HEIGHT, "New Game");
   while (!WindowShouldClose()) {
     BeginDrawing();
-    game_update();
+    if (!game_update()) break;
     EndDrawing();
   }
   CloseWindow();
