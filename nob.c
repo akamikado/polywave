@@ -96,7 +96,7 @@ int main(int argc, char **argv) {
   cmd_append(&cmd, "-Wall", "-Wextra");
   cmd_append(&cmd, "-mwindows");
   cmd_append(&cmd, "-I./raylib-5.5_win64_mingw-w64/include");
-  cmd_append(&cmd, "-o", BUILD_FOLDER "polywave.exe");
+  cmd_append(&cmd, "-o", BUILD_FOLDER "polywave-windows.exe");
   cmd_append(&cmd, SRC_FOLDER "main.c");
   cmd_append(&cmd, SRC_FOLDER "game.c");
   cmd_append(&cmd, "-L./raylib-5.5_win64_mingw-w64/lib");
@@ -111,7 +111,7 @@ int main(int argc, char **argv) {
   cmd_append(&cmd, "cc");
   cmd_append(&cmd, "-Wall", "-Wextra");
   cmd_append(&cmd, "-I./raylib-5.5_linux_amd64/include/");
-  cmd_append(&cmd, "-o", BUILD_FOLDER "polywave");
+  cmd_append(&cmd, "-o", BUILD_FOLDER "polywave-linux");
   cmd_append(&cmd, SRC_FOLDER "main.c");
   cmd_append(&cmd, SRC_FOLDER "game.c");
   cmd_append(&cmd, "./raylib-5.5_linux_amd64/lib/libraylib.a");
