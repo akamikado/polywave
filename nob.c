@@ -16,7 +16,7 @@ int main(int argc, char **argv) {
   }
 
   #ifdef __WIN32
-  cmd_append(&cmd, "x86_64-w64-mingw32-gcc");
+  cmd_append(&cmd, "gcc");
   cmd_append(&cmd, "-Wall", "-Wextra");
   cmd_append(&cmd, "-mwindows");
   cmd_append(&cmd, "-I./raylib-5.5_win32_mingw-w64/include/");
