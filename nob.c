@@ -108,7 +108,7 @@ int main(int argc, char **argv) {
     return 1;
   }
   #else
-  #ifdef __CLANG__
+  #ifdef MACOS
   cmd_append(&cmd, "clang");
   #else
   cmd_append(&cmd, "cc");

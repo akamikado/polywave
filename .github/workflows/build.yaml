@@ -30,7 +30,7 @@ jobs:
 
       - name: Build and run nob
         run: |
-          clang -o nob nob.c
+          clang -o nob nob.c -DMACOS
           ./nob
 
       - name: Upload executable
