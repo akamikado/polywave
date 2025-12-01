@@ -108,7 +108,11 @@ int main(int argc, char **argv) {
     return 1;
   }
   #else
+  #ifdef __CLANG__
+  cmd_append(&cmd, "clang");
+  #else
   cmd_append(&cmd, "cc");
+  #endif
   cmd_append(&cmd, "-Wall", "-Wextra");
   cmd_append(&cmd, "-I./raylib-5.5_linux_amd64/include/");
   cmd_append(&cmd, "-o", BUILD_FOLDER "polywave-linux");
