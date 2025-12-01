@@ -20,37 +20,38 @@
 #include "../nob.h"
 
 #define GAME_TIME (10.0f * 60.0f) // 10 MINS
-#define TIMER_COLOR BLUE
+#define TIMER_COLOR GetColor(0xb7978fff)
 #define TIMER_THICKNESS 20.0f
 
 #define FFT_SIZE (1 << 13)
 #define NUM_BARS 40
+#define VISUALIZER_COLOR GetColor(0xdc5318ff)
 
 #define LOAD_RADIUS 750.0f
 
+#define OBJ_COLOR GetColor(0x523a34ff)
 #define OBJ_SIZE 60.0f
 #define OBJ_GEN_START_TIME 20.0f
-
-#define BG_COLOR BLACK
 
 #define CHUNK_SIZE (3 * 3 * OBJ_SIZE)
 #define MAX_CHUNKS (size_t)(0.25*1024*1024 / sizeof(Map_Chunk))
 
 #define INIT_FUEL_PER_CHUNK 5
 #define MAX_FUEL_PER_CHUNK 35
-#define FUEL_SIZE 3.0f
-#define FUEL_COLOR GREEN
+#define FUEL_SIZE 4.0f
+#define FUEL_COLOR GetColor(0x0e34a0ff)
 #define FUEL_PICKUP_REWARD 0.05f
 
-#define ENEMY_COLOR YELLOW
+#define ENEMY_COLOR GetColor(0xfb232eff)
 #define ENEMY_SIZE 60.0f
 #define MAX_ENEMIES 25
 #define ENEMY_SPD 150.0f
 #define ENEMY_DEFEAT_REWARD 0.8f
-#define ENEMY_GEN_START_TIME 40.0f
+#define ENEMY_GEN_START_TIME 10.0f
 #define INIT_ENEMY_GEN_RATE 0.2f
 #define MAX_ENEMY_GEN_RATE 0.05f
 
+#define PLAYER_COLOR GetColor(0xef946cff)
 #define PLAYER_NORMAL_SPD 225.0f
 #define PLAYER_BOOST_SPD 750.0f
 #define PLAYER_SIZE 40.0f
@@ -315,7 +316,7 @@ void draw_chunk() {
       if (chunk->obj_generated){
         Vector2 obj_center = Vector2Add(center_of_rec, (Vector2){.x = (chunk->obj.i - 1) * OBJ_SIZE, .y = (chunk->obj.j - 1) * OBJ_SIZE});
         Vector2 obj_corner = Vector2Subtract(obj_center, (Vector2){.x = OBJ_SIZE / 2, .y = OBJ_SIZE / 2});
-        DrawRectangleV(obj_corner, (Vector2){.x = OBJ_SIZE, .y = OBJ_SIZE}, BLUE);
+        DrawRectangleV(obj_corner, (Vector2){.x = OBJ_SIZE, .y = OBJ_SIZE}, OBJ_COLOR);
 
         #ifdef DISPLAY_COLLISION_LINES
           Vector2 verts[] = {
@@ -839,7 +840,7 @@ void fft_render(Rectangle bbox, float displayable) {
     Vector2 start_pos = {.x = bbox.x + (gap_between_bars + rec_width) * i,
                          .y = bbox.y + bbox.height - bbox.height * avg_amp};
     Vector2 size = {.x = rec_width, .y = bbox.height * avg_amp};
-    DrawRectangleV(start_pos, size, RED);
+    DrawRectangleV(start_pos, size, VISUALIZER_COLOR);
   }
 }
 
@@ -947,8 +948,15 @@ bool game_update() {
           DrawCircleLinesV(s->character_pos, LOAD_RADIUS, WHITE);
         #endif
 
-        DrawCircleV(s->character_pos, PLAYER_SIZE, RED);
-        DrawCircleV(mouse_character_relative, s->cursor_size, RED);
+        DrawCircleV(s->character_pos, PLAYER_SIZE, PLAYER_COLOR);
+        DrawCircleV(mouse_character_relative, s->cursor_size, PLAYER_COLOR);
+
+        if (s->time < OBJ_GEN_START_TIME) {
+          const char* game_aim = "Survive till timer reaches end";
+          const char* boost_help = "Press SPACE for boost";
+          DrawText(game_aim, -MeasureText(game_aim, 50)/2, 100, 50, TEXT_COLOR);
+          DrawText(boost_help, -MeasureText(boost_help, 50)/2, 200, 50, TEXT_COLOR);
+        }
 
         EndMode2D();
 
@@ -963,12 +971,28 @@ bool game_update() {
       break;
     case GAME_WON:
       {
-        // TODO
+        if (IsKeyPressed(KEY_ENTER)) {
+          s->displaying = false;
+        }
+
+        const char* win_message = "YOU WON!!";
+        DrawText(win_message, w / 2 - MeasureText(win_message, 75) / 2, h / 2, 75, TEXT_COLOR);
+        const char* continue_message = "Press ENTER to return to main screen";
+        DrawText(continue_message, w / 2 - MeasureText(continue_message, 50) / 2, h / 2 + 200, 50, TEXT_COLOR);
       }
       break;
     case GAME_LOST:
       {
-        // TODO
+        if (IsKeyPressed(KEY_ENTER)) {
+          s->displaying = false;
+        }
+
+        const char* loss_message = "YOU LOST";
+        DrawText(loss_message, w / 2 - MeasureText(loss_message, 75) / 2, h / 2 - 100, 75, TEXT_COLOR);
+        const char* better_luck_message = "Better luck next time!";
+        DrawText(better_luck_message, w / 2 - MeasureText(better_luck_message, 75) / 2, h / 2, 75, TEXT_COLOR);
+        const char* continue_message = "Press ENTER to return to main screen";
+        DrawText(continue_message, w / 2 - MeasureText(continue_message, 50) / 2, h / 2 + 200, 50, TEXT_COLOR);
       }
       break;
   }
