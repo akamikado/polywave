@@ -18,6 +18,10 @@
 #define NOB_STRIP_PREFIX
 #include "../nob.h"
 
+#define GAME_TIME (10.0f * 60.0f) // 10 MINS
+#define TIMER_COLOR BLUE
+#define TIMER_THICKNESS 20.0f
+
 #define FFT_SIZE (1 << 13)
 
 #define LOAD_RADIUS 750.0f
@@ -66,6 +70,8 @@ typedef struct {
 
 
 typedef struct {
+  float time;
+
   char *song;
   Wave wave;
   Music music;
@@ -97,9 +103,9 @@ typedef struct {
   Enemies enemies;
   size_t max_enemies;
   float enemy_speed;
-} ReloadableState;
+} State;
 
-static ReloadableState *s = NULL;
+static State *s = NULL;
 
 static void unload_chunk() {
   assert(hmlen(s->chunk_loaded) > 0);
@@ -238,9 +244,14 @@ static void update_chunk_priority(Vector2 key) {
 
 void calc_player_speed(float dt, Vector2 mouse_dist, bool boost_mode, float rem_boost_time) {
   if (Vector2Length(mouse_dist) > PLAYER_SIZE) {
-    float player_speed = boost_mode ? PLAYER_BOOST_SPD : PLAYER_NORMAL_SPD;
-    s->character_speed.x = player_speed * (mouse_dist.x / (WNDW_WIDTH / 2));
-    s->character_speed.y = player_speed * (mouse_dist.y / (WNDW_HEIGHT / 2));
+    if (boost_mode) {
+      Vector2 mouse_dir = Vector2Normalize(mouse_dist);
+      s->character_speed.x = PLAYER_BOOST_SPD * mouse_dir.x;
+      s->character_speed.y = PLAYER_BOOST_SPD * mouse_dir.y;
+    } else {
+      s->character_speed.x = PLAYER_NORMAL_SPD * (mouse_dist.x / (WNDW_WIDTH / 2));
+      s->character_speed.y = PLAYER_NORMAL_SPD * (mouse_dist.y / (WNDW_HEIGHT / 2));
+    }
 
     Vector2 new_pos = Vector2Add(s->character_pos, Vector2Scale(s->character_speed, dt));
 
@@ -629,7 +640,7 @@ void game_init() {
 
   SetTargetFPS(60);
 
-  s = malloc(sizeof(ReloadableState));
+  s = malloc(sizeof(State));
   memset(s, 0, sizeof(*s)); 
 
   InitAudioDevice();
@@ -665,6 +676,8 @@ void game_update() {
   float h = GetScreenHeight();
   float dt = GetFrameTime();
 
+  s->time += dt;
+
   HideCursor();
 
   s->camera.offset = (Vector2){.x = WNDW_WIDTH / 2, .y = WNDW_HEIGHT / 2};
@@ -676,6 +689,7 @@ void game_update() {
     UpdateMusicStream(s->music);
     fft_analyze();
   }
+
 
   Vector2 mouse = GetMousePosition();
   Vector2 mouse_center_relative = Vector2Subtract(mouse, (Vector2){.x = WNDW_WIDTH / 2, .y = WNDW_HEIGHT / 2});
@@ -771,20 +785,13 @@ void game_update() {
     Rectangle bbox = {.x = w - 225, .y = h - 175, .width = 200, .height = 150};
     fft_render(bbox, s->fuel_percent);
   }
-}
 
-void *game_pre_reload() {
-  destroy_chunks();
-  fft_clean();
-  return s;
-}
-
-void game_post_reload(void *prevState) { 
-  s = prevState;
-  init_chunks();
+  float timer_length = (s->time / GAME_TIME) * w;
+  DrawLineEx((Vector2){.x = 0, .y = h}, (Vector2){.x = timer_length, .y = h}, TIMER_THICKNESS, TIMER_COLOR);
 }
 
 void game_close() { 
   destroy_chunks();
+  free(s);
   CloseAudioDevice();
 }
