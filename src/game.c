@@ -107,6 +107,22 @@ typedef struct {
 
 static State *s = NULL;
 
+static void init_chunks() {
+  s->chunk_loaded = NULL;
+  s->chunks.head = malloc(sizeof(*(s->chunks.head)));
+  s->chunks.tail = malloc(sizeof(*(s->chunks.tail)));
+  s->chunks.head->next = s->chunks.tail;
+  s->chunks.head->prev = NULL;
+  s->chunks.tail->next = NULL;
+  s->chunks.tail->prev = s->chunks.head;
+}
+
+static void destroy_chunks() {
+  hmfree(s->chunk_loaded);
+  free(s->chunks.head);
+  free(s->chunks.tail);
+}
+
 static void unload_chunk() {
   assert(hmlen(s->chunk_loaded) > 0);
   Map_Chunk_List* least_priority_chunk = s->chunks.tail->prev;
@@ -211,22 +227,6 @@ static void generate_chunk(Vector2 center, bool generate_object) {
   hmput(s->chunk_loaded, center, new);
 }
 
-static void init_chunks() {
-  s->chunk_loaded = NULL;
-  s->chunks.head = malloc(sizeof(*(s->chunks.head)));
-  s->chunks.tail = malloc(sizeof(*(s->chunks.tail)));
-  s->chunks.head->next = s->chunks.tail;
-  s->chunks.head->prev = NULL;
-  s->chunks.tail->next = NULL;
-  s->chunks.tail->prev = s->chunks.head;
-}
-
-static void destroy_chunks() {
-  hmfree(s->chunk_loaded);
-  free(s->chunks.head);
-  free(s->chunks.tail);
-}
-
 static void update_chunk_priority(Vector2 key) {
   if (hmlen(s->chunk_loaded) <= 1) return;
 
@@ -242,9 +242,56 @@ static void update_chunk_priority(Vector2 key) {
   chunk->prev = s->chunks.head;
 }
 
-void calc_player_speed(float dt, Vector2 mouse_dist, bool boost_mode, float rem_boost_time) {
+static void load_chunks() {
+  for (int i = -2; i <= 2; i++) {
+    for (int j = -2; j <= 2; j++) {
+      Vector2 center_of_rec;
+      center_of_rec.x = floorf((s->character_pos.x + i * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
+      center_of_rec.y = floorf((s->character_pos.y + j * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
+
+      if (hmgeti(s->chunk_loaded, center_of_rec) < 0) {
+        generate_chunk(center_of_rec, true);
+      } else {
+        update_chunk_priority(center_of_rec);
+      }
+    }
+  }
+}
+
+void draw_objects() {
+  for (int i = -2; i <= 2; i++) {
+    for (int j = -2; j <= 2; j++) {
+      Vector2 center_of_rec;
+      center_of_rec.x = floorf((s->character_pos.x + i * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
+      center_of_rec.y = floorf((s->character_pos.y + j * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
+
+      assert(hmgeti(s->chunk_loaded, center_of_rec) >= 0);
+      Map_Chunk* chunk = hmget(s->chunk_loaded, center_of_rec)->value;
+      if (chunk->obj_generated){
+        Vector2 obj_center = Vector2Add(center_of_rec, (Vector2){.x = (chunk->obj.i - 1) * OBJ_SIZE, .y = (chunk->obj.j - 1) * OBJ_SIZE});
+        Vector2 obj_corner = Vector2Subtract(obj_center, (Vector2){.x = OBJ_SIZE / 2, .y = OBJ_SIZE / 2});
+        DrawRectangleV(obj_corner, (Vector2){.x = OBJ_SIZE, .y = OBJ_SIZE}, BLUE);
+
+        #ifdef DISPLAY_COLLISION_LINES
+          Vector2 verts[] = {
+            {.x = obj_center.x - OBJ_SIZE * 0.55f, .y = obj_center.y - OBJ_SIZE * 0.55f},
+            {.x = obj_center.x - OBJ_SIZE * 0.55f, .y = obj_center.y + OBJ_SIZE * 0.55f},
+            {.x = obj_center.x + OBJ_SIZE * 0.55f, .y = obj_center.y + OBJ_SIZE * 0.55f},
+            {.x = obj_center.x + OBJ_SIZE * 0.55f, .y = obj_center.y - OBJ_SIZE * 0.55f},
+          };
+          DrawLineV(verts[0], verts[1], WHITE);
+          DrawLineV(verts[1], verts[2], WHITE);
+          DrawLineV(verts[2], verts[3], WHITE);
+          DrawLineV(verts[3], verts[0], WHITE);
+       #endif
+      }
+    }
+  }
+}
+
+static void calc_player_speed(float dt, Vector2 mouse_dist) {
   if (Vector2Length(mouse_dist) > PLAYER_SIZE) {
-    if (boost_mode) {
+    if (s->boost_mode) {
       Vector2 mouse_dir = Vector2Normalize(mouse_dist);
       s->character_speed.x = PLAYER_BOOST_SPD * mouse_dir.x;
       s->character_speed.y = PLAYER_BOOST_SPD * mouse_dir.y;
@@ -332,13 +379,13 @@ void calc_player_speed(float dt, Vector2 mouse_dist, bool boost_mode, float rem_
   }
 }
 
-void calc_player_pos(float dt, Vector2 mouse_rel, bool boost_mode, float rem_boost_time) {
-  calc_player_speed(dt, mouse_rel, boost_mode, rem_boost_time);
+static void calc_player_pos(float dt, Vector2 mouse_rel) {
+  calc_player_speed(dt, mouse_rel);
 
   s->character_pos = Vector2Add(s->character_pos, Vector2Scale(s->character_speed, dt));
 }
 
-void generate_enemies(float dt) {
+static void generate_enemies(float dt) {
   for (size_t i = 0; i < s->enemies.count; i++) {
     if (!CheckCollisionPointCircle(s->enemies.items[i].pos, s->character_pos, LOAD_RADIUS)){
       da_remove_unordered(&s->enemies, i);
@@ -352,7 +399,24 @@ void generate_enemies(float dt) {
   }
 }
 
-void calc_enemy_position(float dt, size_t GRID_SIZE, bool occupied[GRID_SIZE][GRID_SIZE]) {
+void calc_enemy_position(float dt) {
+  size_t GRID_SIZE = 5 * (CHUNK_SIZE / OBJ_SIZE);
+  bool occupied[GRID_SIZE][GRID_SIZE];
+  memset(occupied, 0, sizeof(occupied));
+
+  for (int i = -2; i <= 2; i++) {
+    for (int j = -2; j <= 2; j++) {
+      Vector2 center_of_rec;
+      center_of_rec.x = floorf((s->character_pos.x + i * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
+      center_of_rec.y = floorf((s->character_pos.y + j * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
+
+      assert(hmgeti(s->chunk_loaded, center_of_rec) >= 0);
+
+      Map_Chunk* chunk = hmget(s->chunk_loaded, center_of_rec)->value;
+      occupied[(int)((2 + i) * (CHUNK_SIZE / OBJ_SIZE) + chunk->obj.i)][(int)((2 + j) * (CHUNK_SIZE / OBJ_SIZE) + chunk->obj.j)] = true;
+    }
+  }
+
   typedef struct {
     int x, y;
   } Cell;
@@ -514,6 +578,24 @@ void calc_enemy_position(float dt, size_t GRID_SIZE, bool occupied[GRID_SIZE][GR
   }
 }
 
+void draw_enemies() {
+  for (size_t i = 0; i < s->enemies.count; i++) {
+    double r = ENEMY_SIZE / sqrt(3.0);
+    double rot = s->enemies.items[i].rotation * M_PI / 180.0;
+    double angles_deg[3] = { 90.0, 210.0, 330.0 };
+
+    Vector2 verts[3];
+    for (int j = 0; j < 3; j++) {
+      double a = (angles_deg[j] * M_PI / 180.0) + rot;
+      verts[j].x = s->enemies.items[i].pos.x + r * cos(a);
+      verts[j].y = s->enemies.items[i].pos.y + r * sin(a);
+    }
+
+    DrawTriangle(verts[2], s->enemies.items[i].pos, verts[0], ENEMY_COLOR);
+    DrawTriangle(verts[0], s->enemies.items[i].pos, verts[1], ENEMY_COLOR);
+  }
+}
+
 static void audio_callback(void *bufferData, unsigned int frames) {
   float (*fs)[2] = bufferData;
 
@@ -671,6 +753,11 @@ void game_init() {
   s->enemy_speed = MAX_ENEMY_SPD;
 }
 
+void camera_init() {
+  s->camera.offset = (Vector2){.x = WNDW_WIDTH / 2, .y = WNDW_HEIGHT / 2};
+  s->camera.target = s->character_pos;
+}
+
 void game_update() {
   float w = GetScreenWidth();
   float h = GetScreenHeight();
@@ -680,8 +767,7 @@ void game_update() {
 
   HideCursor();
 
-  s->camera.offset = (Vector2){.x = WNDW_WIDTH / 2, .y = WNDW_HEIGHT / 2};
-  s->camera.target = s->character_pos;
+  camera_init();
 
   ClearBackground(BG_COLOR);
 
@@ -689,7 +775,6 @@ void game_update() {
     UpdateMusicStream(s->music);
     fft_analyze();
   }
-
 
   Vector2 mouse = GetMousePosition();
   Vector2 mouse_center_relative = Vector2Subtract(mouse, (Vector2){.x = WNDW_WIDTH / 2, .y = WNDW_HEIGHT / 2});
@@ -701,81 +786,22 @@ void game_update() {
     s->boost_mode = false;
   }
 
-  calc_player_pos(dt, mouse_center_relative, s->boost_mode, s->fuel_percent * BOOST_TIME);
+  calc_player_pos(dt, mouse_center_relative);
 
-  size_t GRID_SIZE = 5 * (CHUNK_SIZE / OBJ_SIZE);
-  bool object_placed[GRID_SIZE][GRID_SIZE];
-  memset(object_placed, 0, sizeof(object_placed));
-
-  for (int i = -2; i <= 2; i++) {
-    for (int j = -2; j <= 2; j++) {
-      Vector2 center_of_rec;
-      center_of_rec.x = floorf((s->character_pos.x + i * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
-      center_of_rec.y = floorf((s->character_pos.y + j * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
-
-      if (hmgeti(s->chunk_loaded, center_of_rec) < 0) {
-        generate_chunk(center_of_rec, true);
-      } else {
-        update_chunk_priority(center_of_rec);
-      }
-      Map_Chunk* chunk = hmget(s->chunk_loaded, center_of_rec)->value;
-      object_placed[(int)((2 + i) * (CHUNK_SIZE / OBJ_SIZE) + chunk->obj.i)][(int)((2 + j) * (CHUNK_SIZE / OBJ_SIZE) + chunk->obj.j)] = true;
-    }
-  }
+  load_chunks();
 
   generate_enemies(dt);
-  calc_enemy_position(dt, GRID_SIZE, object_placed);
+  calc_enemy_position(dt);
 
   BeginMode2D(s->camera);
 
-  for (int i = -2; i <= 2; i++) {
-    for (int j = -2; j <= 2; j++) {
-      Vector2 center_of_rec;
-      center_of_rec.x = floorf((s->character_pos.x + i * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
-      center_of_rec.y = floorf((s->character_pos.y + j * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
-
-      assert(hmgeti(s->chunk_loaded, center_of_rec) >= 0);
-      Map_Chunk* chunk = hmget(s->chunk_loaded, center_of_rec)->value;
-      if (chunk->obj_generated){
-        Vector2 obj_center = Vector2Add(center_of_rec, (Vector2){.x = (chunk->obj.i - 1) * OBJ_SIZE, .y = (chunk->obj.j - 1) * OBJ_SIZE});
-        Vector2 obj_corner = Vector2Subtract(obj_center, (Vector2){.x = OBJ_SIZE / 2, .y = OBJ_SIZE / 2});
-        DrawRectangleV(obj_corner, (Vector2){.x = OBJ_SIZE, .y = OBJ_SIZE}, BLUE);
-
-        #ifdef DISPLAY_COLLISION_LINES
-          Vector2 verts[] = {
-            {.x = obj_center.x - OBJ_SIZE * 0.55f, .y = obj_center.y - OBJ_SIZE * 0.55f},
-            {.x = obj_center.x - OBJ_SIZE * 0.55f, .y = obj_center.y + OBJ_SIZE * 0.55f},
-            {.x = obj_center.x + OBJ_SIZE * 0.55f, .y = obj_center.y + OBJ_SIZE * 0.55f},
-            {.x = obj_center.x + OBJ_SIZE * 0.55f, .y = obj_center.y - OBJ_SIZE * 0.55f},
-          };
-          DrawLineV(verts[0], verts[1], WHITE);
-          DrawLineV(verts[1], verts[2], WHITE);
-          DrawLineV(verts[2], verts[3], WHITE);
-          DrawLineV(verts[3], verts[0], WHITE);
-       #endif
-      }
-    }
-  }
-
-  for (size_t i = 0; i < s->enemies.count; i++) {
-    double r = ENEMY_SIZE / sqrt(3.0);
-    double rot = s->enemies.items[i].rotation * M_PI / 180.0;
-    double angles_deg[3] = { 90.0, 210.0, 330.0 };
-
-    Vector2 verts[3];
-    for (int j = 0; j < 3; j++) {
-      double a = (angles_deg[j] * M_PI / 180.0) + rot;
-      verts[j].x = s->enemies.items[i].pos.x + r * cos(a);
-      verts[j].y = s->enemies.items[i].pos.y + r * sin(a);
-    }
-
-    DrawTriangle(verts[2], s->enemies.items[i].pos, verts[0], ENEMY_COLOR);
-    DrawTriangle(verts[0], s->enemies.items[i].pos, verts[1], ENEMY_COLOR);
-  }
+  draw_objects();
+  draw_enemies();
 
   #ifdef DISPLAY_LOAD_RADIUS
     DrawCircleLinesV(s->character_pos, LOAD_RADIUS, WHITE);
   #endif
+
   DrawCircleV(s->character_pos, PLAYER_SIZE, RED);
   DrawCircleV(mouse_character_relative, s->cursor_size, RED);
 
