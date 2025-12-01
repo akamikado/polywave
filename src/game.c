@@ -29,12 +29,14 @@
 #define LOAD_RADIUS 750.0f
 
 #define OBJ_SIZE 60.0f
+#define OBJ_GEN_START_TIME 20.0f
 
 #define BG_COLOR BLACK
 
 #define CHUNK_SIZE (3 * 3 * OBJ_SIZE)
 #define MAX_CHUNKS (size_t)(0.25*1024*1024 / sizeof(Map_Chunk))
 
+#define INIT_FUEL_PER_CHUNK 5
 #define MAX_FUEL_PER_CHUNK 35
 #define FUEL_SIZE 3.0f
 #define FUEL_COLOR GREEN
@@ -45,6 +47,9 @@
 #define MAX_ENEMIES 25
 #define ENEMY_SPD 150.0f
 #define ENEMY_DEFEAT_REWARD 0.8f
+#define ENEMY_GEN_START_TIME 40.0f
+#define INIT_ENEMY_GEN_RATE 0.2f
+#define MAX_ENEMY_GEN_RATE 0.05f
 
 #define PLAYER_NORMAL_SPD 225.0f
 #define PLAYER_BOOST_SPD 750.0f
@@ -126,6 +131,8 @@ typedef struct {
 
   Enemies enemies;
   size_t max_enemies;
+  float last_enemy_gen_time;
+  float enemy_gen_rate;
 } State;
 
 static State *s = NULL;
@@ -279,6 +286,8 @@ static void update_chunk_priority(Vector2 key) {
 }
 
 static void load_chunks() {
+  s->fuel_per_chunk = INIT_FUEL_PER_CHUNK + (MAX_FUEL_PER_CHUNK - INIT_FUEL_PER_CHUNK) * (s->time / GAME_TIME);
+
   for (int i = -2; i <= 2; i++) {
     for (int j = -2; j <= 2; j++) {
       Vector2 center_of_rec;
@@ -286,7 +295,7 @@ static void load_chunks() {
       center_of_rec.y = floorf((s->character_pos.y + j * CHUNK_SIZE)/CHUNK_SIZE)*CHUNK_SIZE;
 
       if (hmgeti(s->chunk_loaded, center_of_rec) < 0) {
-        generate_chunk(center_of_rec, true);
+        generate_chunk(center_of_rec, s->time > OBJ_GEN_START_TIME);
       } else {
         update_chunk_priority(center_of_rec);
       }
@@ -424,17 +433,23 @@ static void calc_player_pos(float dt, Vector2 mouse_rel) {
   s->character_pos = Vector2Add(s->character_pos, Vector2Scale(s->character_speed, dt));
 }
 
-static void generate_enemies(float dt) {
+static void generate_enemies() {
+  if (s->time < ENEMY_GEN_START_TIME) return;
+
   for (size_t i = 0; i < s->enemies.count; i++) {
     if (!CheckCollisionPointCircle(s->enemies.items[i].pos, s->character_pos, LOAD_RADIUS)){
       da_remove_unordered(&s->enemies, i);
     }
   }
+
+  s->enemy_gen_rate = INIT_ENEMY_GEN_RATE + (MAX_ENEMY_GEN_RATE - INIT_ENEMY_GEN_RATE) * (s->time / GAME_TIME);
+
   // TODO: change this while loop to create enemies after certain period of time
-  while (s->enemies.count < s->max_enemies) {
+  if (s->time - s->last_enemy_gen_time > s->enemy_gen_rate && s->enemies.count < s->max_enemies) {
     int spawn_pos_angle = (rand() % 360) * (M_PI / 180.0f);
     Vector2 spawn_pos = {.x = s->character_pos.x + LOAD_RADIUS * cosf(spawn_pos_angle), .y = s->character_pos.y + LOAD_RADIUS * sinf(spawn_pos_angle)};
     da_append(&s->enemies, ((Enemy){.pos = spawn_pos, .rotation = 0}));
+    s->last_enemy_gen_time = s->time;
   }
 }
 
@@ -852,7 +867,7 @@ void game_init() {
   AttachAudioStreamProcessor(s->music.stream, audio_callback);
 
   s->fuel_percent = 1.0f;
-  s->fuel_per_chunk = MAX_FUEL_PER_CHUNK;
+  s->fuel_per_chunk = INIT_FUEL_PER_CHUNK;
 
   s->camera.offset = (Vector2){.x = WNDW_WIDTH / 2, .y = WNDW_HEIGHT / 2};
   s->camera.target = s->character_pos;
@@ -864,6 +879,7 @@ void game_init() {
   init_chunks();
 
   s->max_enemies = MAX_ENEMIES;
+  s->enemy_gen_rate = INIT_ENEMY_GEN_RATE;
   memset(&s->enemies, 0, sizeof(s->enemies));
 }
 
@@ -890,7 +906,6 @@ bool game_update() {
           s->state = GAME_WON;
         }
 
-
         camera_init();
 
         if (IsMusicStreamPlaying(s->music)) {
@@ -903,9 +918,11 @@ bool game_update() {
         Vector2 mouse_character_relative = Vector2Add(mouse_center_relative, s->character_pos);
 
         if(IsKeyDown(KEY_SPACE) && s->fuel_percent > 0) {
+          if (!s->boost_mode) {
+            calc_boost_speed();
+          }
           s->boost_mode = true;
           s->fuel_percent -= dt;
-          calc_boost_speed();
         } else {
           s->boost_mode = false;
         }
@@ -914,7 +931,7 @@ bool game_update() {
 
         load_chunks();
 
-        generate_enemies(dt);
+        generate_enemies();
         calc_enemy_position(dt);
 
         check_enemy_collision();
