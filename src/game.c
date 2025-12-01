@@ -45,10 +45,10 @@
 #define ENEMY_COLOR GetColor(0xfb232eff)
 #define ENEMY_SIZE 60.0f
 #define MAX_ENEMIES 25
-#define ENEMY_SPD 150.0f
+#define ENEMY_SPD 180.0f
 #define ENEMY_DEFEAT_REWARD 0.8f
-#define ENEMY_GEN_START_TIME 10.0f
-#define INIT_ENEMY_GEN_RATE 0.2f
+#define ENEMY_GEN_START_TIME 40.0f
+#define INIT_ENEMY_GEN_RATE 0.5f
 #define MAX_ENEMY_GEN_RATE 0.05f
 
 #define PLAYER_COLOR GetColor(0xef946cff)
@@ -844,7 +844,7 @@ void fft_render(Rectangle bbox, float displayable) {
   }
 }
 
-void game_init() {
+void game_init(char* music_file) {
   srand(time(NULL));
 
   SetTargetFPS(60);
@@ -856,10 +856,9 @@ void game_init() {
   s->state = GAME_PLAYING;
 
   InitAudioDevice();
-  s->song = strdup("build/bfg_division.mp3");
-  /* s->song = strdup("build/In-the-Dead-of-Night.ogg"); */
-  /* s->song = strdup("build/Dark-Lands.mp3"); */
-  /* s->song = strdup("build/Insane-Gameplay.mp3"); */
+  char song[1024];
+  sprintf(song, "assets/%s", music_file);
+  s->song = strdup(song);
 
   s->wave = LoadWave(s->song);
   s->music = LoadMusicStream(s->song);
