@@ -20,6 +20,25 @@
 
 #define FFT_SIZE (1 << 13)
 
+#define LOAD_RADIUS 750.0f
+
+#define OBJ_SIZE 60.0f
+
+#define BG_COLOR BLACK
+
+#define CHUNK_SIZE (3 * 3 * OBJ_SIZE)
+#define MAX_CHUNKS (size_t)(0.25*1024*1024 / sizeof(Map_Chunk))
+
+#define ENEMY_COLOR YELLOW
+#define ENEMY_SIZE 60.0f
+#define MAX_ENEMIES 25
+#define MAX_ENEMY_SPD 150.0f
+
+#define PLAYER_NORMAL_SPD 225.0f
+#define PLAYER_BOOST_SPD 750.0f
+#define PLAYER_SIZE 40.0f
+#define BOOST_TIME 5.0f
+
 typedef struct {
   Vector2 center;
   bool obj_generated;
@@ -34,13 +53,6 @@ typedef struct Map_Chunk_List {
   Map_Chunk* value;
 } Map_Chunk_List;
 
-#define LOAD_RADIUS 750.0f
-
-#define OBJ_SIZE 60.0f
-
-#define CHUNK_SIZE (3 * 3 * OBJ_SIZE)
-#define MAX_CHUNKS (size_t)(0.25*1024*1024 / sizeof(Map_Chunk))
-
 typedef struct {
   Vector2 pos;
   float rotation;
@@ -52,12 +64,6 @@ typedef struct {
   size_t capacity;
 } Enemies;
 
-#define ENEMY_SIZE 60.0f
-#define MAX_ENEMIES 25
-#define MAX_ENEMY_SPD 150.0f
-
-#define PLAYER_SPD 225.0f
-#define PLAYER_SIZE 40.0f
 
 typedef struct {
   char *song;
@@ -68,6 +74,9 @@ typedef struct {
   float in_smooth[FFT_SIZE];
   float complex out_raw[FFT_SIZE];
   float out[FFT_SIZE];
+  size_t out_cnt;
+
+  float fuel_percent;
 
   Camera2D camera;
 
@@ -75,6 +84,7 @@ typedef struct {
   float character_size;
   Vector2 character_speed;
   float cursor_size;
+  bool boost_mode;
 
   struct {
     Vector2 key;
@@ -226,10 +236,11 @@ static void update_chunk_priority(Vector2 key) {
   chunk->prev = s->chunks.head;
 }
 
-void calc_player_speed(float dt, Vector2 mouse_dist) {
+void calc_player_speed(float dt, Vector2 mouse_dist, bool boost_mode, float rem_boost_time) {
   if (Vector2Length(mouse_dist) > PLAYER_SIZE) {
-    s->character_speed.x = PLAYER_SPD * (mouse_dist.x / (WNDW_WIDTH / 2));
-    s->character_speed.y = PLAYER_SPD * (mouse_dist.y / (WNDW_HEIGHT / 2));
+    float player_speed = boost_mode ? PLAYER_BOOST_SPD : PLAYER_NORMAL_SPD;
+    s->character_speed.x = player_speed * (mouse_dist.x / (WNDW_WIDTH / 2));
+    s->character_speed.y = player_speed * (mouse_dist.y / (WNDW_HEIGHT / 2));
 
     Vector2 new_pos = Vector2Add(s->character_pos, Vector2Scale(s->character_speed, dt));
 
@@ -300,8 +311,8 @@ void calc_player_speed(float dt, Vector2 mouse_dist) {
           if (dir.x == 0 && dir.y == 0) {
             dir = (Vector2) {.x = 1, .y = 0};
           }
-          s->character_speed.x = dir.x * PLAYER_SPD;
-          s->character_speed.y = dir.y * PLAYER_SPD;
+          s->character_speed.x = dir.x * PLAYER_NORMAL_SPD;
+          s->character_speed.y = dir.y * PLAYER_NORMAL_SPD;
         }
       }
     }
@@ -310,7 +321,13 @@ void calc_player_speed(float dt, Vector2 mouse_dist) {
   }
 }
 
-void generate_enemies() {
+void calc_player_pos(float dt, Vector2 mouse_rel, bool boost_mode, float rem_boost_time) {
+  calc_player_speed(dt, mouse_rel, boost_mode, rem_boost_time);
+
+  s->character_pos = Vector2Add(s->character_pos, Vector2Scale(s->character_speed, dt));
+}
+
+void generate_enemies(float dt) {
   for (size_t i = 0; i < s->enemies.count; i++) {
     if (!CheckCollisionPointCircle(s->enemies.items[i].pos, s->character_pos, LOAD_RADIUS)){
       da_remove_unordered(&s->enemies, i);
@@ -536,7 +553,7 @@ static void fft(float *a, float complex *A) {
   }
 }
 
-void fft_render(Rectangle bbox) {
+void fft_analyze() {
   // https://en.wikipedia.org/wiki/Hann_function
   for (size_t i = 0; i < FFT_SIZE; ++i) {
     float t = (float)i / FFT_SIZE;
@@ -581,16 +598,21 @@ void fft_render(Rectangle bbox) {
   // Normalize
   for (size_t i = 0; i < out_cnt; ++i) {
     s->out[i] /= max_amp;
+    s->out[i] = (1 - cosf(M_PI * s->out[i])) / 2.0;
   }
 
-  int num_bars = 30;
-  size_t amp_per_bar = floor(out_cnt / num_bars);
+  s->out_cnt = out_cnt;
+}
+
+void fft_render(Rectangle bbox, float displayable) {
+  int num_bars = 40;
+  size_t amp_per_bar = floor(s->out_cnt / num_bars);
   float rec_width = bbox.width / (num_bars * 2);
   float gap_between_bars = bbox.width / (num_bars * 2);
 
-  for (int i = 0; i < num_bars; i++) {
+  for (int i = 0; i < floor(num_bars * displayable); i++) {
     float avg_amp = 0.0f;
-    for (size_t j = 0; i * amp_per_bar + j < out_cnt && j < amp_per_bar; j++) {
+    for (size_t j = 0; i * amp_per_bar + j < s->out_cnt && j < amp_per_bar; j++) {
       avg_amp += s->out[i * amp_per_bar + j];
     }
     avg_amp /= amp_per_bar;
@@ -619,8 +641,10 @@ void game_init() {
   s->wave = LoadWave(s->song);
   s->music = LoadMusicStream(s->song);
   fft_clean();
-  // PlayMusicStream(s->music);
+  PlayMusicStream(s->music);
   AttachAudioStreamProcessor(s->music.stream, audio_callback);
+
+  s->fuel_percent = 1.0f;
 
   s->camera.offset = (Vector2){.x = WNDW_WIDTH / 2, .y = WNDW_HEIGHT / 2};
   s->camera.target = s->character_pos;
@@ -646,23 +670,24 @@ void game_update() {
   s->camera.offset = (Vector2){.x = WNDW_WIDTH / 2, .y = WNDW_HEIGHT / 2};
   s->camera.target = s->character_pos;
 
-  ClearBackground(BLACK);
+  ClearBackground(BG_COLOR);
 
   if (IsMusicStreamPlaying(s->music)) {
     UpdateMusicStream(s->music);
-
-    Rectangle bbox = {.x = 0, .y = 100, .width = w, .height = h - 200};
-    fft_render(bbox);
+    fft_analyze();
   }
 
   Vector2 mouse = GetMousePosition();
   Vector2 mouse_center_relative = Vector2Subtract(mouse, (Vector2){.x = WNDW_WIDTH / 2, .y = WNDW_HEIGHT / 2});
   Vector2 mouse_character_relative = Vector2Add(mouse_center_relative, s->character_pos);
 
+  if(IsKeyDown(KEY_SPACE)) {
+    s->boost_mode = true;
+  } else {
+    s->boost_mode = false;
+  }
 
-  calc_player_speed(dt, mouse_center_relative);
-
-  s->character_pos = Vector2Add(s->character_pos, Vector2Scale(s->character_speed, dt));
+  calc_player_pos(dt, mouse_center_relative, s->boost_mode, s->fuel_percent * BOOST_TIME);
 
   size_t GRID_SIZE = 5 * (CHUNK_SIZE / OBJ_SIZE);
   bool object_placed[GRID_SIZE][GRID_SIZE];
@@ -684,7 +709,7 @@ void game_update() {
     }
   }
 
-  generate_enemies();
+  generate_enemies(dt);
   calc_enemy_position(dt, GRID_SIZE, object_placed);
 
   BeginMode2D(s->camera);
@@ -730,15 +755,22 @@ void game_update() {
       verts[j].y = s->enemies.items[i].pos.y + r * sin(a);
     }
 
-    DrawTriangle(verts[2], s->enemies.items[i].pos, verts[0], YELLOW);
-    DrawTriangle(verts[0], s->enemies.items[i].pos, verts[1], YELLOW);
+    DrawTriangle(verts[2], s->enemies.items[i].pos, verts[0], ENEMY_COLOR);
+    DrawTriangle(verts[0], s->enemies.items[i].pos, verts[1], ENEMY_COLOR);
   }
 
-  DrawCircleLinesV(s->character_pos, LOAD_RADIUS, WHITE);
+  #ifdef DISPLAY_LOAD_RADIUS
+    DrawCircleLinesV(s->character_pos, LOAD_RADIUS, WHITE);
+  #endif
   DrawCircleV(s->character_pos, PLAYER_SIZE, RED);
   DrawCircleV(mouse_character_relative, s->cursor_size, RED);
 
   EndMode2D();
+
+  if (IsMusicStreamPlaying(s->music)) {
+    Rectangle bbox = {.x = w - 225, .y = h - 175, .width = 200, .height = 150};
+    fft_render(bbox, s->fuel_percent);
+  }
 }
 
 void *game_pre_reload() {
