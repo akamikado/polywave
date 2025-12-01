@@ -15,7 +15,7 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  #ifdef __WIN32
+  #ifdef _WIN32
   cmd_append(&cmd, "gcc");
   cmd_append(&cmd, "-Wall", "-Wextra");
   cmd_append(&cmd, "-mwindows");
