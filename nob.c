@@ -107,6 +107,7 @@ int main(int argc, char **argv) {
   #ifdef MACOS
   cmd_append(&cmd, "clang");
   cmd_append(&cmd, "-Wall", "-Wextra");
+  cmd_append(&cmd, "-target=arm64");
   cmd_append(&cmd, "-I./raylib-5.5_macos/include/");
   cmd_append(&cmd, "-o", BUILD_FOLDER "polywave-linux");
   cmd_append(&cmd, SRC_FOLDER "main.c");
