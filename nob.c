@@ -113,7 +113,11 @@ int main(int argc, char **argv) {
   cmd_append(&cmd, SRC_FOLDER "game.c");
   cmd_append(&cmd, "./raylib-5.5_macos/lib/libraylib.a");
   cmd_append(&cmd, "-lm");
-  cmd_append(&cmd, "$(pkg-config --libs --cflags raylib)");
+  cmd_append(&cmd, "-framework CoreVideo");
+  cmd_append(&cmd, "-framework IOKit");
+  cmd_append(&cmd, "-framework Cocoa");
+  cmd_append(&cmd, "-framework GLUT");
+  cmd_append(&cmd, "-framework OpenGL");
   #else
   cmd_append(&cmd, "gcc");
   cmd_append(&cmd, "-Wall", "-Wextra");
