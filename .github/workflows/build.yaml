@@ -37,7 +37,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: polywave-macos
-          path: build/polywave-linux
+          path: build/polywave-macos
 
   windows:
     runs-on: windows-latest
