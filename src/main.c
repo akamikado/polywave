@@ -179,7 +179,7 @@ int main() {
 
               if (hFind == INVALID_HANDLE_VALUE) {
                   printf("Could not open assets folder\n");
-                  return;
+                  return 1;
               }
 
               do {
