@@ -91,8 +91,8 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  cmd_append(&cmd, "gcc");
   #ifdef _WIN32
+  cmd_append(&cmd, "gcc");
   cmd_append(&cmd, "-Wall", "-Wextra");
   cmd_append(&cmd, "-mwindows");
   cmd_append(&cmd, "-I./raylib-5.5_win64_mingw-w64/include");
@@ -105,6 +105,7 @@ int main(int argc, char **argv) {
   cmd_append(&cmd, "-lwinmm");
   #else
   #ifdef MACOS
+  cmd_append(&cmd, "clang");
   cmd_append(&cmd, "-Wall", "-Wextra");
   cmd_append(&cmd, "-I./raylib-5.5_macos/include/");
   cmd_append(&cmd, "-o", BUILD_FOLDER "polywave-macos");
@@ -112,7 +113,9 @@ int main(int argc, char **argv) {
   cmd_append(&cmd, SRC_FOLDER "game.c");
   cmd_append(&cmd, "./raylib-5.5_macos/lib/libraylib.a");
   cmd_append(&cmd, "-lm");
+  cmd_append(&cmd, "$(pkg-config --libs --cflags raylib)");
   #else
+  cmd_append(&cmd, "gcc");
   cmd_append(&cmd, "-Wall", "-Wextra");
   cmd_append(&cmd, "-I./raylib-5.5_linux_amd64/include/");
   cmd_append(&cmd, "-o", BUILD_FOLDER "polywave-linux");
