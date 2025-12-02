@@ -173,7 +173,32 @@ int main() {
 
           if (!loaded) {
             loaded = true;
+            #ifdef _WIN32
+             WIN32_FIND_DATAA findData;
+              HANDLE hFind = FindFirstFileA("assets\\*", &findData);
 
+              if (hFind == INVALID_HANDLE_VALUE) {
+                  printf("Could not open assets folder\n");
+                  return;
+              }
+
+              do {
+                  if (strcmp(findData.cFileName, ".") == 0 ||
+                      strcmp(findData.cFileName, "..") == 0) continue;
+
+                  char fullpath[512];
+                  snprintf(fullpath, sizeof(fullpath), "assets/%s", findData.cFileName);
+
+                  struct stat st;
+                  if (stat(fullpath, &st) == 0 && S_ISREG(st.st_mode)) {
+                      char *copy = _strdup(findData.cFileName);
+                      nob_da_append(&music_files, copy);
+                  }
+              }
+              while (FindNextFileA(hFind, &findData));
+
+              FindClose(hFind);
+            #else
             DIR *dir = opendir("assets");
             struct dirent *entry;
 
@@ -193,6 +218,7 @@ int main() {
               }
               closedir(dir);
             }
+            #endif
           }
 
           ClearBackground(BG_COLOR);
