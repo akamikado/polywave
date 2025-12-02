@@ -105,7 +105,7 @@ int main(int argc, char **argv) {
   cmd_append(&cmd, "-lwinmm");
   #else
   #ifdef MACOS
-  cmd_append(&cmd, "clang");
+  cmd_append(&cmd, "gcc");
   cmd_append(&cmd, "-Wall", "-Wextra");
   cmd_append(&cmd, "--target=arm64");
   cmd_append(&cmd, "-I./raylib-5.5_macos/include/");
